@@ -18,6 +18,7 @@ from orpilot.llm.config import LLMConfig, get_llm
 from orpilot.models.problem import ProblemDefinition
 from orpilot.models.data import UserData, DataParameter
 from orpilot.models.solution import SolutionResult
+from orpilot.paths import DATA_DIR
 from orpilot.workflow.graph import build_graph
 
 
@@ -32,7 +33,7 @@ class Agent:
         api_key: str | None = None,
         base_url: str | None = None,
         max_retries: int = 3,
-        data_dir: str = "./data",
+        data_dir: str = str(DATA_DIR),
         output_dir: str | None = None,
     ):
         self._llm_config = LLMConfig(

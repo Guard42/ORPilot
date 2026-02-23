@@ -12,6 +12,10 @@ class IRSet(BaseModel):
     index_symbol: str
     source: str | None
     column: str | None
+    # Optional: derive set size from a scalar integer stored in a parameter CSV.
+    # When set, the compiler emits list(range(int(data[size_source][0][size_column]))).
+    size_source: str | None = None
+    size_column: str | None = None
 
 
 class IRParameter(BaseModel):
@@ -19,6 +23,7 @@ class IRParameter(BaseModel):
     type: str
     source: str | None
     column: str | None = None  # CSV column that holds this parameter's values
+    index_columns: list[str] | None = None  # per-index CSV key columns; overrides set_column lookup
 
 
 class IRVariable(BaseModel):
@@ -28,6 +33,8 @@ class IRVariable(BaseModel):
     type: str
     lower_bound: float | None
     upper_bound: float | None
+    upper_bound_set: str | None = None  # when set, compiler emits len(SetName) as the upper bound
+    exclude_diagonal: bool = False  # when True, exclude (i, i, ...) keys from the variable dict
 
 
 class IRConstraint(BaseModel):

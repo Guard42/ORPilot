@@ -24,7 +24,14 @@ Keep questions concise and focused on the problem structure, not the data. \
 After gathering enough information, summarize the problem and confirm with the \
 user before proceeding.
 
-Before finishing the interview, you MUST ask the user one final question:
+Before finishing the interview, you MUST first present a structured summary of \
+everything you have understood so far, covering:
+- The objective (what is being optimized and whether it is minimized or maximized)
+- The decision variables (what choices will the model make)
+- The constraints (all limitations and requirements)
+- Any other relevant context
+
+After the summary, ask the user one final question:
 "Is there anything else you'd like to add, or anything I may have missed?"
 Do NOT include [INTERVIEW_COMPLETE] in that message — wait for the user's reply first.
 Only after the user has responded to that final question (and you have incorporated \

@@ -11,6 +11,7 @@ from orpilot.llm.config import LLMConfig, get_llm
 from orpilot.workflow.state import WorkflowState
 from orpilot.workflow.nodes.interview import interview_node
 from orpilot.workflow.nodes.data_collection import data_collection_node
+from orpilot.workflow.nodes.param_computation import param_computation_node
 from orpilot.workflow.nodes.ir_builder import ir_builder_node
 from orpilot.workflow.nodes.ir_compiler_node import ir_compiler_node
 from orpilot.workflow.nodes.solver_runner import solver_runner_node
@@ -39,6 +40,7 @@ def build_graph(
     # Add nodes — bind the LLM where needed
     graph.add_node("interview", lambda state: interview_node(state, llm))
     graph.add_node("data_collection", lambda state: data_collection_node(state, llm))
+    graph.add_node("param_computation", lambda state: param_computation_node(state, llm))
     graph.add_node("ir_builder", lambda state: ir_builder_node(state, llm))
     graph.add_node("ir_compiler", lambda state: ir_compiler_node(state, llm))
     graph.add_node("solver_runner", lambda state: solver_runner_node(state))
@@ -54,9 +56,12 @@ def build_graph(
     graph.add_conditional_edges("interview", edges.after_interview)
     graph.add_conditional_edges("data_collection", edges.after_data_collection)
 
-    # ir_builder → ir_compiler → solver_runner
+    # param_computation → ir_builder (always, even if no computation was done)
+    graph.add_edge("param_computation", "ir_builder")
+
+    # ir_builder → ir_compiler → solver_runner (or back to ir_builder on compile error)
     graph.add_edge("ir_builder", "ir_compiler")
-    graph.add_edge("ir_compiler", "solver_runner")
+    graph.add_conditional_edges("ir_compiler", edges.after_ir_compiler)
 
     # solver_runner routes based on result
     graph.add_conditional_edges("solver_runner", edges.after_solver_runner)

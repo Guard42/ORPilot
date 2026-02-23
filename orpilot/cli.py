@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import tomllib
 from pathlib import Path
+from typing import Optional
 
 import typer
+from dotenv import load_dotenv
+
+# Load .env before Typer resolves envvar= options (e.g. OPENAI_API_KEY).
+load_dotenv()
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 
 from orpilot.llm.config import LLMConfig, get_llm
+from orpilot.paths import DATA_DIR
 from orpilot.workflow.graph import build_graph
 from orpilot.workflow.state import WorkflowState
 from orpilot.models.problem import ProblemDefinition
@@ -22,6 +30,37 @@ app = typer.Typer(
     help="AI Operations Research Agent — LLM-powered OR modeling and solving",
 )
 console = Console()
+
+_AUTO_CONFIG_NAMES = ("orpilot.toml", "orpilot.json")
+
+
+def _load_config_file(path: Path) -> dict:
+    """Load config values from a TOML or JSON file."""
+    if path.suffix.lower() == ".json":
+        return json.loads(path.read_text(encoding="utf-8"))
+    with open(path, "rb") as f:
+        return tomllib.load(f)
+
+
+def _discover_config_file() -> Path | None:
+    """Locate a config file via ORPILOT_CONFIG env var or by walking up from CWD."""
+    # 1. Explicit env var (absolute path, works regardless of working directory)
+    env_path = os.environ.get("ORPILOT_CONFIG")
+    if env_path:
+        return Path(env_path)
+
+    # 2. Walk up from CWD (like git looking for .git)
+    current = Path.cwd()
+    while True:
+        for name in _AUTO_CONFIG_NAMES:
+            candidate = current / name
+            if candidate.exists():
+                return candidate
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
 
 # ---------------------------------------------------------------------------
 # Logging helpers
@@ -104,31 +143,37 @@ def _parse_variable_dimensions(
     """
     import re
 
+    _SEP = "\x1f"  # Unit Separator — used by IR compiler to delimit dimensions
+
     parsed: list[tuple[list[str], object]] = []
     max_dims = 0
 
     for var_name, value in sorted(variables.items()):
-        # Try tuple-style: ship_('WH1',_'CUST2')
-        tuple_match = re.match(r"^([^(]+?)_?\((.+)\)$", var_name)
-        if tuple_match:
-            inner = tuple_match.group(2)
-            dims = [
-                d.strip().strip("'\"").strip("_").strip()
-                for d in inner.split(",")
-                if d.strip().strip("'\"").strip("_").strip()
-            ]
+        if _SEP in var_name:
+            # Unambiguous delimiter: "prefix\x1fdim1\x1fdim2\x1f..."
+            parts = var_name.split(_SEP, 1)
+            dims = parts[1].split(_SEP) if len(parts) > 1 else []
         else:
-            # Underscore-separated: shipment_WH1_CUST1 → strip prefix
-            parts = var_name.split("_")
-            if len(parts) >= 2:
-                # Remove the prefix (group_name may itself contain underscores)
-                prefix_parts = group_name.split("_")
-                if parts[: len(prefix_parts)] == prefix_parts:
-                    dims = parts[len(prefix_parts):]
-                else:
-                    dims = parts[1:]
+            # Try tuple-style: ship_('WH1',_'CUST2')
+            tuple_match = re.match(r"^([^(]+?)_?\((.+)\)$", var_name)
+            if tuple_match:
+                inner = tuple_match.group(2)
+                dims = [
+                    d.strip().strip("'\"").strip("_").strip()
+                    for d in inner.split(",")
+                    if d.strip().strip("'\"").strip("_").strip()
+                ]
             else:
-                dims = []
+                # Legacy underscore-separated fallback (no underscores in IDs)
+                parts = var_name.split("_")
+                if len(parts) >= 2:
+                    prefix_parts = group_name.split("_")
+                    if parts[: len(prefix_parts)] == prefix_parts:
+                        dims = parts[len(prefix_parts):]
+                    else:
+                        dims = parts[1:]
+                else:
+                    dims = []
 
         max_dims = max(max_dims, len(dims))
         parsed.append((dims, value))
@@ -215,20 +260,57 @@ def _save_solution(state: dict, output_dir: str, con: Console) -> None:
 
 @app.command()
 def run(
-    provider: str = typer.Option("openai", "--provider", "-p", help="LLM provider (openai, anthropic)"),
-    model: str = typer.Option(None, "--model", "-m", help="Model name override"),
-    solver: str = typer.Option("pulp", "--solver", "-s", help="OR solver (pulp, pyomo, ortools)"),
-    problem_file: Path = typer.Option(None, "--problem", help="Load problem definition from JSON file"),
-    data_file: Path = typer.Option(None, "--data", help="Load data from JSON file"),
-    data_dir: Path = typer.Option("./data", "--data-dir", "-d", help="Directory for CSV data files"),
-    output_dir: Path = typer.Option(None, "--output-dir", "-o", help="Directory to save generated code, LP file, and solution"),
-    max_retries: int = typer.Option(3, "--max-retries", help="Max solver code retries"),
-    api_key: str = typer.Option(None, "--api-key", envvar="OPENAI_API_KEY"),
-    base_url: str = typer.Option(None, "--base-url", envvar="OPENAI_BASE_URL", help="Custom API base URL (e.g. https://api.deepseek.com)"),
+    config_file: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to a TOML or JSON config file. CLI options take precedence. Auto-discovered if orpilot.toml exists in the current directory."),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="LLM provider (openai, anthropic)"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name override"),
+    solver: Optional[str] = typer.Option(None, "--solver", "-s", help="OR solver (pulp, pyomo, ortools)"),
+    problem_file: Optional[Path] = typer.Option(None, "--problem", help="Load problem definition from JSON file"),
+    data_file: Optional[Path] = typer.Option(None, "--data", help="Load data from JSON file"),
+    data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d", help="Directory for CSV data files"),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Directory to save generated code, LP file, and solution"),
+    max_retries: Optional[int] = typer.Option(None, "--max-retries", help="Max solver code retries"),
+    time_limit: Optional[int] = typer.Option(None, "--time-limit", "-t", help="Max solver run time in seconds. Stops early and returns best solution found."),
+    show_solver_log: Optional[bool] = typer.Option(None, "--solver-log/--no-solver-log", help="Stream the solver log to stdout."),
+    verbose: Optional[bool] = typer.Option(None, "--verbose/--no-verbose", help="Show full solver and compiler error details"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", envvar="OPENAI_API_KEY"),
+    base_url: Optional[str] = typer.Option(None, "--base-url", envvar="OPENAI_BASE_URL", help="Custom API base URL (e.g. https://api.deepseek.com)"),
 ) -> None:
     """Start an interactive ORPilot session."""
-    from dotenv import load_dotenv
-    load_dotenv()
+    # --- Load config file ---
+    # Explicit --config takes priority; otherwise auto-discover orpilot.toml/json.
+    cfg: dict = {}
+    resolved_config = config_file
+    if resolved_config is None:
+        resolved_config = _discover_config_file()
+    if resolved_config is not None:
+        if not resolved_config.exists():
+            console.print(f"[red]Config file not found: {resolved_config}[/red]")
+            raise typer.Exit(1)
+        cfg = _load_config_file(resolved_config)
+        console.print(f"[dim]Loaded config from {resolved_config}[/dim]")
+
+    # --- Merge: CLI values > config file values > hardcoded defaults ---
+    provider        = provider        or cfg.get("provider",         "openai")
+    model           = model           or cfg.get("model")
+    solver          = solver          or cfg.get("solver",           "pulp")
+    max_retries     = max_retries     if max_retries     is not None else cfg.get("max_retries",     3)
+    time_limit      = time_limit      if time_limit      is not None else cfg.get("time_limit",      300)
+    verbose         = verbose         if verbose         is not None else cfg.get("verbose",         False)
+    show_solver_log = show_solver_log if show_solver_log is not None else cfg.get("show_solver_log", False)
+    base_url        = base_url        or cfg.get("base_url")
+    api_key         = api_key         or cfg.get("api_key")
+
+    # Resolve path options: relative paths from a config file are relative to
+    # the config file's directory; CLI-supplied paths are relative to CWD.
+    cfg_dir = resolved_config.parent if resolved_config is not None else Path.cwd()
+    if data_dir is None:
+        data_dir = (cfg_dir / cfg["data_dir"]).resolve() if "data_dir" in cfg else DATA_DIR
+    else:
+        data_dir = data_dir.resolve()
+    if output_dir is None and "output_dir" in cfg:
+        output_dir = (cfg_dir / cfg["output_dir"]).resolve()
+    elif output_dir is not None:
+        output_dir = output_dir.resolve()
 
     llm_config = LLMConfig(provider=provider, model=model, api_key=api_key, base_url=base_url)
     llm = get_llm(llm_config)
@@ -263,6 +345,8 @@ def run(
         "data_dir": str(data_dir),
         "csv_specs": [],
         "output_dir": output_dir_str,
+        "solver_time_limit": time_limit,
+        "show_solver_log": show_solver_log,
     }
 
     # Load problem from file if provided
@@ -332,9 +416,27 @@ def run(
                         console.print(f"[{style}]✓ {msg}[/{style}]")
 
                 elif node_name == "ir_compiler":
-                    if state.get("generated_code"):
+                    error = state.get("error_context", "")
+                    if not error:
                         style, msg = _NODE_COMPLETE_LABELS["ir_compiler"]
                         console.print(f"[{style}]✓ {msg}[/{style}]")
+                    else:
+                        retry = state.get("retry_count", 0)
+                        max_r = state.get("max_retries", 3)
+                        if verbose:
+                            console.print(Panel(
+                                error,
+                                title=f"[red]✗ Compiler error (attempt {retry}/{max_r})[/red]",
+                                border_style="red",
+                            ))
+                        else:
+                            first_line = error.split("\n")[0][:200]
+                            console.print(
+                                f"[red]✗ Compiler error (attempt {retry}/{max_r}): "
+                                f"{first_line}[/red]"
+                            )
+                            console.print("[dim]   (use --verbose / -v to see full details)[/dim]")
+                        console.print("[yellow]   Retrying with error feedback...[/yellow]")
 
                 elif node_name == "solver_runner":
                     solution = state.get("solution")
@@ -342,10 +444,21 @@ def run(
                         if solution.error_message:
                             retry = state.get("retry_count", 0)
                             max_r = state.get("max_retries", 3)
-                            console.print(
-                                f"[red]✗ Solver error (attempt {retry}/{max_r}): "
-                                f"{solution.error_message[:200]}[/red]"
-                            )
+                            if verbose:
+                                detail = solution.error_message
+                                if solution.solver_output:
+                                    detail += f"\n\nSolver output:\n{solution.solver_output}"
+                                console.print(Panel(
+                                    detail,
+                                    title=f"[red]✗ Solver error (attempt {retry}/{max_r})[/red]",
+                                    border_style="red",
+                                ))
+                            else:
+                                console.print(
+                                    f"[red]✗ Solver error (attempt {retry}/{max_r}): "
+                                    f"{solution.error_message[:200]}[/red]"
+                                )
+                                console.print("[dim]   (use --verbose / -v to see full details)[/dim]")
                             console.print("[yellow]   Retrying with error feedback...[/yellow]")
                         else:
                             style, msg = _NODE_COMPLETE_LABELS["solver_runner"]

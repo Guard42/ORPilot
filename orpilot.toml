@@ -1,0 +1,18 @@
+# ORPilot configuration file
+# CLI options take precedence over values here.
+# This file is auto-discovered when running `orpilot run` from the ORPilot directory.
+
+provider        = "openai"
+#model         = "gpt-4o"       # uncomment to pin a specific model
+
+solver          = "pulp"
+time_limit      = 300            # seconds
+show_solver_log = false
+verbose         = false
+max_retries     = 3
+
+data_dir        = "data"
+output_dir      = "output"
+
+api_key       = ""  # prefer OPENAI_API_KEY env var instead
+base_url      = ""  # custom API endpoint, e.g. https://api.deepseek.com

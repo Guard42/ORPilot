@@ -15,8 +15,10 @@ def solver_runner_node(state: WorkflowState) -> WorkflowState:
 
     solver = get_solver(solver_name)
     data_dict = user_data.as_dict() if user_data else {}
+    time_limit = state.get("solver_time_limit")
+    show_solver_log = state.get("show_solver_log", False)
 
-    solution = solver.solve(code, data_dict)
+    solution = solver.solve(code, data_dict, time_limit=time_limit, show_solver_log=show_solver_log)
 
     updates: dict = {
         "solution": solution,

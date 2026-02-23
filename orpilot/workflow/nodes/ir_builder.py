@@ -42,10 +42,51 @@ def ir_builder_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
     if csv_schemas:
         user_payload["csv_schemas"] = csv_schemas
 
-    messages = [
-        {"role": "system", "content": ir_builder_prompts.SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps(user_payload)},
-    ]
+    error_context = state.get("error_context")
+    existing_ir = state.get("ir_model")
+    generated_code = state.get("generated_code", "")
+
+    if error_context and existing_ir:
+        # Retry after downstream failure: show the LLM the IR it produced, the Python
+        # code that was compiled from it, and the error — so it can trace the bug back
+        # to the IR rather than guessing from the error message alone.
+        code_block = f"```python\n{generated_code}\n```\n\n" if generated_code else ""
+        messages = [
+            {"role": "system", "content": ir_builder_prompts.SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(user_payload)},
+            {"role": "assistant", "content": json.dumps(existing_ir)},
+            {
+                "role": "user",
+                "content": (
+                    f"The IR you produced was compiled to this Python solver code:\n\n"
+                    f"{code_block}"
+                    f"Running that code produced this error:\n\n"
+                    f"{error_context}\n\n"
+                    "Identify the root cause in your IR and return a corrected JSON IR. "
+                    "Output JSON only."
+                ),
+            },
+        ]
+    elif error_context:
+        # param_computation failed — inform the LLM so it knows computed CSVs may be missing
+        messages = [
+            {"role": "system", "content": ir_builder_prompts.SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    json.dumps(user_payload) + "\n\n"
+                    f"Warning: parameter computation failed and some derived CSVs "
+                    f"may not be available:\n{error_context}\n\n"
+                    "If a required CSV is missing from csv_file_paths, set source to null "
+                    "and the model will need to be corrected once the data issue is resolved."
+                ),
+            },
+        ]
+    else:
+        messages = [
+            {"role": "system", "content": ir_builder_prompts.SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(user_payload)},
+        ]
 
     for attempt in range(3):  # initial attempt + up to 2 retries
         response = llm.chat(messages)
@@ -61,7 +102,7 @@ def ir_builder_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
                     "current_node": "reporter",
                 }
             IRModel.model_validate(ir_dict)
-            return {**state, "ir_model": ir_dict, "current_node": "ir_builder"}
+            return {**state, "ir_model": ir_dict, "error_context": "", "current_node": "ir_builder"}
         except Exception as exc:
             messages.append({"role": "assistant", "content": response})
             messages.append({

@@ -17,15 +17,29 @@ def after_interview(state: WorkflowState) -> str:
 def after_data_collection(state: WorkflowState) -> str:
     """Route after data collection node."""
     if state.get("user_data") is not None:
-        return "ir_builder"
+        return "param_computation"
     return "wait_for_input"
+
+
+def after_ir_compiler(state: WorkflowState) -> str:
+    """Route after IR compilation."""
+    if not state.get("error_context"):
+        return "solver_runner"
+
+    # Compilation failed — check retry budget
+    retry_count = state.get("retry_count", 0)
+    max_retries = state.get("max_retries", 3)
+    if retry_count < max_retries:
+        return "ir_builder"
+
+    return "reporter"
 
 
 def after_solver_runner(state: WorkflowState) -> str:
     """Route after solver execution."""
     solution = state.get("solution")
     if solution is None:
-        return "ir_compiler"
+        return "ir_builder"
 
     if solution.status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE):
         return "reporter"
@@ -34,7 +48,8 @@ def after_solver_runner(state: WorkflowState) -> str:
     retry_count = state.get("retry_count", 0)
     max_retries = state.get("max_retries", 3)
     if retry_count < max_retries:
-        return "ir_compiler"
+        # Recompiling the same IR is pointless — go back to the LLM to fix the IR
+        return "ir_builder"
 
     # Exhausted retries — report the failure
     return "reporter"

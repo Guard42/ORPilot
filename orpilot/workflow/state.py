@@ -53,3 +53,9 @@ class WorkflowState(TypedDict, total=False):
 
     # Debug output
     output_dir: str
+
+    # Solver time limit in seconds (None = no limit)
+    solver_time_limit: int | None
+
+    # Whether to stream the solver log to stdout
+    show_solver_log: bool

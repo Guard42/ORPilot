@@ -12,14 +12,29 @@ from .base import BaseLLM
 class AnthropicLLM(BaseLLM):
     """Anthropic Claude provider."""
 
-    def __init__(self, model: str = "claude-sonnet-4-5-20250929", api_key: str | None = None):
+    def __init__(
+        self,
+        model: str = "claude-sonnet-4-5-20250929",
+        api_key: str | None = None,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+        max_retries: int = 2,
+    ):
         import anthropic
 
-        kwargs: dict = {}
+        kwargs: dict = {"timeout": timeout}
         if api_key:
             kwargs["api_key"] = api_key
         self._client = anthropic.Anthropic(**kwargs)
         self._model = model
+        self._max_tokens = max_tokens
+        self._max_retries = max_retries
+        self._timeout_exceptions = self._resolve_timeout_exc()
+
+    @staticmethod
+    def _resolve_timeout_exc() -> tuple:
+        import anthropic
+        return (anthropic.APITimeoutError, anthropic.APIConnectionError)
 
     def chat(self, messages: list[dict]) -> str:
         system = None
@@ -32,14 +47,16 @@ class AnthropicLLM(BaseLLM):
 
         kwargs: dict = {
             "model": self._model,
-            "max_tokens": 4096,
+            "max_tokens": self._max_tokens,
             "messages": chat_messages,
         }
         if system:
             kwargs["system"] = system
 
-        response = self._client.messages.create(**kwargs)
-        return response.content[0].text
+        def _call():
+            return self._client.messages.create(**kwargs).content[0].text
+
+        return self._retry(_call, self._max_retries, self._timeout_exceptions)
 
     def structured_output(
         self, messages: list[dict], schema: type[BaseModel]
@@ -60,19 +77,22 @@ class AnthropicLLM(BaseLLM):
         if system is None:
             system = suffix.strip()
 
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=4096,
-            system=system,
-            messages=chat_messages,
-        )
-        raw = response.content[0].text
+        def _call():
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=system,
+                messages=chat_messages,
+            )
+            raw = response.content[0].text
 
-        # Extract JSON from possible markdown fencing
-        if "```" in raw:
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start != -1 and end > start:
-                raw = raw[start:end]
+            # Extract JSON from possible markdown fencing
+            if "```" in raw:
+                start = raw.find("{")
+                end = raw.rfind("}") + 1
+                if start != -1 and end > start:
+                    raw = raw[start:end]
 
-        return schema.model_validate_json(raw)
+            return schema.model_validate_json(raw)
+
+        return self._retry(_call, self._max_retries, self._timeout_exceptions)

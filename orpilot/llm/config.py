@@ -16,6 +16,12 @@ class LLMConfig:
     model: str | None = None
     api_key: str | None = None
     base_url: str | None = None
+    # Hard cap on generated tokens — keeps responses fast and bounded.
+    max_tokens: int = 4096
+    # Per-request timeout in seconds.
+    timeout: float = 120.0
+    # How many times to retry after a timeout before giving up.
+    max_retries: int = 2
     extra: dict = field(default_factory=dict)
 
 
@@ -39,10 +45,23 @@ def get_llm(config: LLMConfig | None = None) -> BaseLLM:
     if provider == "openai":
         from .openai import OpenAILLM
 
-        return OpenAILLM(model=model, api_key=config.api_key, base_url=config.base_url)
+        return OpenAILLM(
+            model=model,
+            api_key=config.api_key,
+            base_url=config.base_url,
+            max_tokens=config.max_tokens,
+            timeout=config.timeout,
+            max_retries=config.max_retries,
+        )
     elif provider == "anthropic":
         from .anthropic import AnthropicLLM
 
-        return AnthropicLLM(model=model, api_key=config.api_key)
+        return AnthropicLLM(
+            model=model,
+            api_key=config.api_key,
+            max_tokens=config.max_tokens,
+            timeout=config.timeout,
+            max_retries=config.max_retries,
+        )
     else:
         raise ValueError(f"Unknown LLM provider: {provider!r}. Supported: openai, anthropic")
