@@ -3,7 +3,7 @@
 # This file is auto-discovered when running `orpilot run` from the ORPilot directory.
 
 provider        = "openai"
-#model         = "gpt-4o"       # uncomment to pin a specific model
+model           = "gpt-5-mini"
 
 solver          = "pulp"
 time_limit      = 300            # seconds
@@ -15,4 +15,7 @@ data_dir        = "data"
 output_dir      = "output"
 
 api_key       = ""  # prefer OPENAI_API_KEY env var instead
-base_url      = ""  # custom API endpoint, e.g. https://api.deepseek.com
+#base_url      = "https://api.deepseek.com"  # custom API endpoint, e.g. https://api.deepseek.com
+
+generate_ir = false   # set to true to generate IR after each successful solve
+temperature = 1     # LLM sampling temperature: 0.0 = deterministic, 1.0 = default creative

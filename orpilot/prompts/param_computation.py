@@ -54,11 +54,14 @@ IF no computation is needed:
 
 Output exactly (and nothing else):
 [NO_COMPUTATION_NEEDED]
+"""
 
-========================================================
+USER_PROMPT_TEMPLATE = """\
 Problem:
 {problem_json}
 
 Available raw data tables:
 {table_schemas}
+
+Analyze the problem and tables, then either write a Python computation script or respond with [NO_COMPUTATION_NEEDED].
 """

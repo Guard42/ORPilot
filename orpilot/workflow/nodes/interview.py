@@ -14,6 +14,11 @@ def interview_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
     If the LLM determines the interview is complete, extract a structured
     ProblemDefinition. Otherwise, set needs_user_input=True to get more info.
     """
+    # Problem already defined — this node is just acting as a router.
+    # Return state unchanged so no extra assistant message is appended.
+    if state.get("problem") is not None:
+        return state
+
     messages = list(state.get("messages", []))
 
     # Build conversation with the interview system prompt

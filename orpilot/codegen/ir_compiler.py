@@ -54,12 +54,12 @@ class IRCompiler:
             if table_stem and column:
                 lines.append(
                     f"    {set_name} = list(dict.fromkeys("
-                    f"row[{column!r}] for row in data[{table_stem!r}]))"
+                    f"str(row[{column!r}]) for row in data[{table_stem!r}]))"
                 )
             elif table_stem:
                 lines.append(
                     f"    {set_name} = list(dict.fromkeys("
-                    f"next(iter(row.values())) for row in data[{table_stem!r}]))"
+                    f"str(next(iter(row.values()))) for row in data[{table_stem!r}]))"
                 )
             else:
                 size = meta.get("size")
@@ -106,10 +106,15 @@ class IRCompiler:
             # Use the explicit "column" from the IR if present; fall back to param_name.
             value_col = meta.get("column") or param_name
 
+            is_str = meta.get("type") == "string"
+            cast = "" if is_str else "float"
+
             # Scalar parameter (no domain): read directly from the first CSV row.
             if not domain:
+                val_expr = f"data[{table_stem!r}][0].get({value_col!r})"
                 lines.append(
-                    f"    {param_name} = float(data[{table_stem!r}][0][{value_col!r}])"
+                    f"    {param_name} = {cast}({val_expr} or 0)" if cast
+                    else f"    {param_name} = {val_expr}"
                 )
                 continue
 
@@ -119,23 +124,38 @@ class IRCompiler:
             if len(domain) == 1:
                 c0 = col_names[0]
                 lines.append(
-                    f"        _key = _row.get({c0!r}) or next("
-                    f"v for k, v in _row.items() if k != {value_col!r})"
+                    f"        _key = str(_row.get({c0!r}) or next("
+                    f"v for k, v in _row.items() if k != {value_col!r}))"
                 )
-                lines.append(f"        {param_name}[_key] = float(_row[{value_col!r}])")
+                val_expr = f"_row.get({value_col!r})"
+                lines.append(
+                    f"        {param_name}[_key] = {cast}({val_expr} or 0)" if cast
+                    else f"        {param_name}[_key] = {val_expr}"
+                )
             elif len(domain) == 2:
                 c0, c1 = col_names[0], col_names[1]
                 lines.append(
-                    f"        _k1 = _row.get({c0!r}) or _row.get({domain[0].lower()!r})"
+                    f"        _k1 = str(_row.get({c0!r}) or _row.get({domain[0].lower()!r}))"
                 )
                 lines.append(
-                    f"        _k2 = _row.get({c1!r}) or _row.get({domain[1].lower()!r})"
+                    f"        _k2 = str(_row.get({c1!r}) or _row.get({domain[1].lower()!r}))"
                 )
+                val_expr = f"_row.get({value_col!r})"
                 lines.append(
-                    f"        {param_name}[(_k1, _k2)] = float(_row[{value_col!r}])"
+                    f"        {param_name}[(_k1, _k2)] = {cast}({val_expr} or 0)" if cast
+                    else f"        {param_name}[(_k1, _k2)] = {val_expr}"
                 )
             else:
-                lines.append(f"        pass  # TODO: domain {domain!r} not supported")
+                for k, c in enumerate(col_names):
+                    lines.append(
+                        f"        _k{k} = str(_row.get({c!r}) or _row.get({domain[k].lower()!r}))"
+                    )
+                key_tuple = ", ".join(f"_k{k}" for k in range(len(col_names)))
+                val_expr = f"_row.get({value_col!r})"
+                lines.append(
+                    f"        {param_name}[({key_tuple},)] = {cast}({val_expr} or 0)" if cast
+                    else f"        {param_name}[({key_tuple},)] = {val_expr}"
+                )
         return lines
 
     def _emit_variable_groups(self, variables: dict) -> list[str]:
@@ -230,6 +250,101 @@ class IRCompiler:
         return None
 
     @staticmethod
+    def _collect_lag_symbols(
+        node: dict,
+        variables: dict,
+        parameters: dict,
+        sets: dict,
+    ) -> dict[str, int]:
+        """Scan an expression tree and return {index_symbol: lag_value} for every
+        ordered-set index that appears with a non-zero 'lag' field on a variable or
+        parameter node.  When a symbol appears with multiple lag values, the one with
+        the largest absolute value (most boundary-sensitive) is kept.
+        """
+        result: dict[str, int] = {}
+        lag = node.get("lag", 0)
+        ntype = node.get("type")
+        if lag and ntype in ("variable", "parameter"):
+            if ntype == "variable":
+                var_domain = variables.get(node.get("name", ""), {}).get("domain", [])
+            else:
+                var_domain = parameters.get(node.get("name", ""), {}).get("domain", [])
+            for idx, set_name in zip(node.get("indices", [])[: len(var_domain)], var_domain):
+                set_meta = sets.get(set_name)
+                if set_meta is None:
+                    continue
+                ordered = (
+                    set_meta.get("ordered", False)
+                    if isinstance(set_meta, dict)
+                    else getattr(set_meta, "ordered", False)
+                )
+                if ordered:
+                    if idx not in result or abs(lag) > abs(result[idx]):
+                        result[idx] = lag
+        for key in ("left", "right", "body"):
+            child = node.get(key)
+            if child:
+                child_lags = IRCompiler._collect_lag_symbols(child, variables, parameters, sets)
+                for sym, lag_val in child_lags.items():
+                    if sym not in result or abs(lag_val) > abs(result[sym]):
+                        result[sym] = lag_val
+        return result
+
+    @staticmethod
+    def _build_lag_context(lag_syms: dict[str, int], sets: dict) -> dict[str, tuple[str, str]]:
+        """Build a lag_context dict from lag_syms.
+
+        Returns {index_symbol: (set_name, enumerate_var_name)} so the expression
+        emitters know which Python variable to use for the enumerate position index.
+        """
+        result: dict[str, tuple[str, str]] = {}
+        for sym in lag_syms:
+            for set_name, set_meta in sets.items():
+                s_sym = (
+                    set_meta.get("index_symbol")
+                    if isinstance(set_meta, dict)
+                    else getattr(set_meta, "index_symbol", None)
+                )
+                if s_sym == sym:
+                    result[sym] = (set_name, f"_idx_{sym}")
+                    break
+        return result
+
+    def _emit_lagged_ref(
+        self,
+        name: str,
+        indices: list[str],
+        domain: list[str],
+        lag: int,
+        lag_context: dict[str, tuple[str, str]],
+        known: set[str],
+        use_get: bool,
+    ) -> str:
+        """Emit a variable or parameter reference with temporal lag applied.
+
+        For each index that maps to an ordered set in lag_context, the reference is
+        shifted: ``var[t]`` with lag=-1 becomes ``var[Months[_idx_t - 1]]``.
+        Non-lagged indices are emitted as plain symbols (or quoted literals if not in known).
+        """
+        modified: list[str] = []
+        for idx, _set_name in zip(indices[: len(domain)], domain):
+            if idx in lag_context:
+                ctx_set, enum_var = lag_context[idx]
+                if lag >= 0:
+                    modified.append(f"{ctx_set}[{enum_var} + {lag}]")
+                else:
+                    modified.append(f"{ctx_set}[{enum_var} - {-lag}]")
+            else:
+                modified.append(idx if idx in known else repr(idx))
+        if len(domain) == 1:
+            key = modified[0]
+        else:
+            key = f"({', '.join(modified)})"
+        if use_get:
+            return f"{name}.get({key}, 0)"
+        return f"{name}[{key}]"
+
+    @staticmethod
     def _index_key(indices: list[str], domain: list[str], known: set[str]) -> str:
         """Return the dict-key expression for a variable reference (without the variable name).
 
@@ -264,6 +379,7 @@ class IRCompiler:
         variables: dict,
         parameters: dict,
         extra_known: set[str] | None = None,
+        lag_context: dict[str, tuple[str, str]] | None = None,
     ) -> str:
         """Emit a Python expression string (PuLP lpSum / plain Python for OR-Tools RHS)."""
         node_type = node.get("type")
@@ -281,6 +397,9 @@ class IRCompiler:
             indices = node.get("indices", [])
             domain = variables.get(name, {}).get("domain", [])
             use_get = bool(variables.get(name, {}).get("exclude_diagonal", False))
+            lag = node.get("lag", 0)
+            if lag and lag_context:
+                return self._emit_lagged_ref(name, indices, domain, lag, lag_context, known, use_get)
             return self._var_ref(name, indices, domain, known, use_get=use_get)
 
         if node_type == "parameter":
@@ -289,9 +408,16 @@ class IRCompiler:
             domain = parameters.get(name, {}).get("domain", [])
             if not indices or not domain:
                 return name
+            lag = node.get("lag", 0)
+            if lag and lag_context:
+                return self._emit_lagged_ref(name, indices, domain, lag, lag_context, known, False)
+
+            def _fmt_pidx(idx: str) -> str:
+                return idx if idx in known else repr(idx)
+
             if len(domain) == 1:
-                return f"{name}[{indices[0]}]"
-            idx_tuple = ", ".join(indices[: len(domain)])
+                return f"{name}[{_fmt_pidx(indices[0])}]"
+            idx_tuple = ", ".join(_fmt_pidx(i) for i in indices[: len(domain)])
             # Use .get() when the same set appears twice in the domain — diagonal keys
             # won't exist in the loaded dict (e.g. distance[('depot','depot')] missing),
             # and the paired variable will also be 0 for those indices.
@@ -303,8 +429,8 @@ class IRCompiler:
             return f"len({node['set']})"
 
         if operation in ("sum", "subtract", "multiply"):
-            left = self._emit_expr(node["left"], index_map, variables, parameters, extra_known)
-            right = self._emit_expr(node["right"], index_map, variables, parameters, extra_known)
+            left = self._emit_expr(node["left"], index_map, variables, parameters, extra_known, lag_context)
+            right = self._emit_expr(node["right"], index_map, variables, parameters, extra_known, lag_context)
             if operation == "multiply":
                 return f"{left} * {right}"
             op = "+" if operation == "sum" else "-"
@@ -319,7 +445,7 @@ class IRCompiler:
                 iter_parts.append(f"for {loop_var} in {set_name}")
                 alias_vars.add(loop_var)
             new_extra = (extra_known or set()) | alias_vars
-            body = self._emit_expr(node["body"], index_map, variables, parameters, new_extra)
+            body = self._emit_expr(node["body"], index_map, variables, parameters, new_extra, lag_context)
             iterators = " ".join(iter_parts)
             return f"pulp.lpSum({body} {iterators})"
 
@@ -332,6 +458,7 @@ class IRCompiler:
         variables: dict,
         parameters: dict,
         extra_known: set[str] | None = None,
+        lag_context: dict[str, tuple[str, str]] | None = None,
     ) -> str:
         """Emit a Pyomo-compatible Python expression string.
 
@@ -356,8 +483,23 @@ class IRCompiler:
             name = node["name"]
             indices = node.get("indices", [])
             domain = variables.get(name, {}).get("domain", [])
+            lag = node.get("lag", 0)
             if not indices or not domain:
                 return f"model.{name}"
+            if lag and lag_context:
+                # Build lagged reference; Pyomo uses comma-separated indices, not tuples
+                modified: list[str] = []
+                for idx, _set_name in zip(indices[: len(domain)], domain):
+                    if idx in lag_context:
+                        ctx_set, enum_var = lag_context[idx]
+                        modified.append(
+                            f"{ctx_set}[{enum_var} + {lag}]" if lag >= 0
+                            else f"{ctx_set}[{enum_var} - {-lag}]"
+                        )
+                    else:
+                        modified.append(_fmt(idx))
+                idx_str = ", ".join(modified)
+                return f"model.{name}[{idx_str}]"
             if len(domain) == 1:
                 return f"model.{name}[{_fmt(indices[0])}]"
             idx_str = ", ".join(_fmt(i) for i in indices[: len(domain)])
@@ -369,9 +511,12 @@ class IRCompiler:
             domain = parameters.get(name, {}).get("domain", [])
             if not indices or not domain:
                 return name
+            lag = node.get("lag", 0)
+            if lag and lag_context:
+                return self._emit_lagged_ref(name, indices, domain, lag, lag_context, known, False)
             if len(domain) == 1:
-                return f"{name}[{indices[0]}]"
-            idx_tuple = ", ".join(indices[: len(domain)])
+                return f"{name}[{_fmt(indices[0])}]"
+            idx_tuple = ", ".join(_fmt(i) for i in indices[: len(domain)])
             # Use .get() when the same set appears twice in the domain.
             if len(set(domain)) < len(domain):
                 return f"{name}.get(({idx_tuple}), 0.0)"
@@ -381,8 +526,8 @@ class IRCompiler:
             return f"len({node['set']})"
 
         if operation in ("sum", "subtract", "multiply"):
-            left = self._emit_pyomo_expr(node["left"], index_map, variables, parameters, extra_known)
-            right = self._emit_pyomo_expr(node["right"], index_map, variables, parameters, extra_known)
+            left = self._emit_pyomo_expr(node["left"], index_map, variables, parameters, extra_known, lag_context)
+            right = self._emit_pyomo_expr(node["right"], index_map, variables, parameters, extra_known, lag_context)
             if operation == "multiply":
                 return f"{left} * {right}"
             op = "+" if operation == "sum" else "-"
@@ -397,7 +542,7 @@ class IRCompiler:
                 iter_parts.append(f"for {loop_var} in {set_name}")
                 alias_vars.add(loop_var)
             new_extra = (extra_known or set()) | alias_vars
-            body = self._emit_pyomo_expr(node["body"], index_map, variables, parameters, new_extra)
+            body = self._emit_pyomo_expr(node["body"], index_map, variables, parameters, new_extra, lag_context)
             iterators = " ".join(iter_parts)
             return f"sum({body} {iterators})"
 
@@ -414,6 +559,7 @@ class IRCompiler:
         indent: int,
         sign: int = 1,
         extra_known: set[str] | None = None,
+        lag_context: dict[str, tuple[str, str]] | None = None,
     ) -> None:
         """Append OR-Tools SetCoefficient calls to *lines* for a linear expression node.
 
@@ -436,7 +582,7 @@ class IRCompiler:
                 alias_vars.add(loop_var)
             new_extra = (extra_known or set()) | alias_vars
             self._emit_ortools_coefficients(
-                node["body"], target, index_map, variables, parameters, lines, indent, sign, new_extra
+                node["body"], target, index_map, variables, parameters, lines, indent, sign, new_extra, lag_context
             )
             return
 
@@ -447,11 +593,13 @@ class IRCompiler:
             indices = node.get("indices", [])
             domain = variables.get(name, {}).get("domain", [])
             excl = bool(variables.get(name, {}).get("exclude_diagonal", False))
-            var_ref = self._var_ref(name, indices, domain, known)
+            lag = node.get("lag", 0)
+            if lag and lag_context:
+                var_ref = self._emit_lagged_ref(name, indices, domain, lag, lag_context, known, excl)
+            else:
+                var_ref = self._var_ref(name, indices, domain, known)
             coeff = "1.0" if sign == 1 else "-1.0"
             if excl:
-                # Use .get() and guard: OR-Tools SetCoefficient needs an actual variable object
-                guard_ref = self._var_ref(name, indices, domain, known)
                 lines.append(f"{pad}_v = {name}.get({self._index_key(indices, domain, known)})")
                 lines.append(f"{pad}if _v is not None: {target}.SetCoefficient(_v, {coeff})")
             else:
@@ -469,32 +617,36 @@ class IRCompiler:
             indices = var_node.get("indices", [])
             domain = variables.get(name, {}).get("domain", [])
             excl = bool(variables.get(name, {}).get("exclude_diagonal", False))
-            coeff_str = self._emit_expr(coeff_node, index_map, variables, parameters, extra_known)
+            lag = var_node.get("lag", 0)
+            coeff_str = self._emit_expr(coeff_node, index_map, variables, parameters, extra_known, lag_context)
             if sign == -1:
                 coeff_str = f"-({coeff_str})"
+            if lag and lag_context:
+                var_ref = self._emit_lagged_ref(name, indices, domain, lag, lag_context, known, excl)
+            else:
+                var_ref = self._var_ref(name, indices, domain, known)
             if excl:
                 lines.append(f"{pad}_v = {name}.get({self._index_key(indices, domain, known)})")
                 lines.append(f"{pad}if _v is not None: {target}.SetCoefficient(_v, {coeff_str})")
             else:
-                var_ref = self._var_ref(name, indices, domain, known)
                 lines.append(f"{pad}{target}.SetCoefficient({var_ref}, {coeff_str})")
             return
 
         if op == "sum":
             self._emit_ortools_coefficients(
-                node["left"], target, index_map, variables, parameters, lines, indent, sign, extra_known
+                node["left"], target, index_map, variables, parameters, lines, indent, sign, extra_known, lag_context
             )
             self._emit_ortools_coefficients(
-                node["right"], target, index_map, variables, parameters, lines, indent, sign, extra_known
+                node["right"], target, index_map, variables, parameters, lines, indent, sign, extra_known, lag_context
             )
             return
 
         if op == "subtract":
             self._emit_ortools_coefficients(
-                node["left"], target, index_map, variables, parameters, lines, indent, sign, extra_known
+                node["left"], target, index_map, variables, parameters, lines, indent, sign, extra_known, lag_context
             )
             self._emit_ortools_coefficients(
-                node["right"], target, index_map, variables, parameters, lines, indent, -sign, extra_known
+                node["right"], target, index_map, variables, parameters, lines, indent, -sign, extra_known, lag_context
             )
             return
 
@@ -599,19 +751,50 @@ class IRCompiler:
             domain = cmeta.get("domain", [])
             sense_op = {"<=": "<=", ">=": ">=", "=": "=="}.get(cmeta.get("sense", "<="), "<=")
             domain_loop_vars = set(self._domain_idx_vars(domain, index_map)) if domain else set()
-            lhs = self._emit_expr(cmeta["expression"], index_map, variables, parameters, extra_known=domain_loop_vars)
-            rhs = self._emit_expr(cmeta["rhs"], index_map, variables, parameters, extra_known=domain_loop_vars)
+            lag_syms: dict[str, int] = {}
+            lag_syms.update(self._collect_lag_symbols(cmeta["expression"], variables, parameters, sets))
+            lag_syms.update(self._collect_lag_symbols(cmeta["rhs"], variables, parameters, sets))
+            lag_ctx = self._build_lag_context(lag_syms, sets) if lag_syms else {}
+            lhs = self._emit_expr(cmeta["expression"], index_map, variables, parameters, extra_known=domain_loop_vars, lag_context=lag_ctx or None)
+            rhs = self._emit_expr(cmeta["rhs"], index_map, variables, parameters, extra_known=domain_loop_vars, lag_context=lag_ctx or None)
 
             if not domain:
                 lines.append(f"    prob += {lhs} {sense_op} {rhs}, {cname!r}")
             elif len(domain) == 1:
                 idx0 = index_map[domain[0]]
-                lines.append(f"    for {idx0} in {domain[0]}:")
+                if idx0 in lag_ctx:
+                    _, _ev0 = lag_ctx[idx0]
+                    _lv0 = lag_syms[idx0]
+                    lines.append(f"    for {_ev0}, {idx0} in enumerate({domain[0]}):")
+                    if _lv0 < 0:
+                        lines.append(f"        if {_ev0} < {-_lv0}: continue")
+                    else:
+                        lines.append(f"        if {_ev0} + {_lv0} >= len({domain[0]}): continue")
+                else:
+                    lines.append(f"    for {idx0} in {domain[0]}:")
                 lines.append(f"        prob += {lhs} {sense_op} {rhs}, f\"{cname}_{{{idx0}}}\"")
             elif len(domain) == 2:
                 idx0, idx1 = self._domain_idx_vars(domain, index_map)
-                lines.append(f"    for {idx0} in {domain[0]}:")
-                lines.append(f"        for {idx1} in {domain[1]}:")
+                if idx0 in lag_ctx:
+                    _, _ev0 = lag_ctx[idx0]
+                    _lv0 = lag_syms[idx0]
+                    lines.append(f"    for {_ev0}, {idx0} in enumerate({domain[0]}):")
+                    if _lv0 < 0:
+                        lines.append(f"        if {_ev0} < {-_lv0}: continue")
+                    else:
+                        lines.append(f"        if {_ev0} + {_lv0} >= len({domain[0]}): continue")
+                else:
+                    lines.append(f"    for {idx0} in {domain[0]}:")
+                if idx1 in lag_ctx:
+                    _, _ev1 = lag_ctx[idx1]
+                    _lv1 = lag_syms[idx1]
+                    lines.append(f"        for {_ev1}, {idx1} in enumerate({domain[1]}):")
+                    if _lv1 < 0:
+                        lines.append(f"            if {_ev1} < {-_lv1}: continue")
+                    else:
+                        lines.append(f"            if {_ev1} + {_lv1} >= len({domain[1]}): continue")
+                else:
+                    lines.append(f"        for {idx1} in {domain[1]}:")
                 guard = self._constraint_diagonal_guard(domain, [idx0, idx1])
                 if guard:
                     lines.append(f"            if {guard}: continue")
@@ -622,7 +805,16 @@ class IRCompiler:
             else:
                 idx_vars = self._domain_idx_vars(domain, index_map)
                 for k, (iv, s) in enumerate(zip(idx_vars, domain)):
-                    lines.append(f"    {'    ' * k}for {iv} in {s}:")
+                    if iv in lag_ctx:
+                        _, _ev = lag_ctx[iv]
+                        _lv = lag_syms[iv]
+                        lines.append(f"    {'    ' * k}for {_ev}, {iv} in enumerate({s}):")
+                        if _lv < 0:
+                            lines.append(f"    {'    ' * (k + 1)}if {_ev} < {-_lv}: continue")
+                        else:
+                            lines.append(f"    {'    ' * (k + 1)}if {_ev} + {_lv} >= len({s}): continue")
+                    else:
+                        lines.append(f"    {'    ' * k}for {iv} in {s}:")
                 name_parts = "\\x1f".join(f"{{{iv}}}" for iv in idx_vars)
                 inner = "    " * (len(domain) + 1)
                 guard = self._constraint_diagonal_guard(domain, idx_vars)
@@ -811,20 +1003,51 @@ class IRCompiler:
             domain = cmeta.get("domain", [])
             sense_op = {"<=": "<=", ">=": ">=", "=": "=="}.get(cmeta.get("sense", "<="), "<=")
             domain_loop_vars = set(self._domain_idx_vars(domain, index_map)) if domain else set()
-            lhs = self._emit_pyomo_expr(cmeta["expression"], index_map, variables, parameters, extra_known=domain_loop_vars)
-            rhs = self._emit_pyomo_expr(cmeta["rhs"], index_map, variables, parameters, extra_known=domain_loop_vars)
+            lag_syms: dict[str, int] = {}
+            lag_syms.update(self._collect_lag_symbols(cmeta["expression"], variables, parameters, sets))
+            lag_syms.update(self._collect_lag_symbols(cmeta["rhs"], variables, parameters, sets))
+            lag_ctx = self._build_lag_context(lag_syms, sets) if lag_syms else {}
+            lhs = self._emit_pyomo_expr(cmeta["expression"], index_map, variables, parameters, extra_known=domain_loop_vars, lag_context=lag_ctx or None)
+            rhs = self._emit_pyomo_expr(cmeta["rhs"], index_map, variables, parameters, extra_known=domain_loop_vars, lag_context=lag_ctx or None)
 
             lines.append(f"    model.{cname} = pyo.ConstraintList()")
             if not domain:
                 lines.append(f"    model.{cname}.add({lhs} {sense_op} {rhs})")
             elif len(domain) == 1:
                 idx0 = index_map[domain[0]]
-                lines.append(f"    for {idx0} in {domain[0]}:")
+                if idx0 in lag_ctx:
+                    _, _ev0 = lag_ctx[idx0]
+                    _lv0 = lag_syms[idx0]
+                    lines.append(f"    for {_ev0}, {idx0} in enumerate({domain[0]}):")
+                    if _lv0 < 0:
+                        lines.append(f"        if {_ev0} < {-_lv0}: continue")
+                    else:
+                        lines.append(f"        if {_ev0} + {_lv0} >= len({domain[0]}): continue")
+                else:
+                    lines.append(f"    for {idx0} in {domain[0]}:")
                 lines.append(f"        model.{cname}.add({lhs} {sense_op} {rhs})")
             elif len(domain) == 2:
                 idx0, idx1 = self._domain_idx_vars(domain, index_map)
-                lines.append(f"    for {idx0} in {domain[0]}:")
-                lines.append(f"        for {idx1} in {domain[1]}:")
+                if idx0 in lag_ctx:
+                    _, _ev0 = lag_ctx[idx0]
+                    _lv0 = lag_syms[idx0]
+                    lines.append(f"    for {_ev0}, {idx0} in enumerate({domain[0]}):")
+                    if _lv0 < 0:
+                        lines.append(f"        if {_ev0} < {-_lv0}: continue")
+                    else:
+                        lines.append(f"        if {_ev0} + {_lv0} >= len({domain[0]}): continue")
+                else:
+                    lines.append(f"    for {idx0} in {domain[0]}:")
+                if idx1 in lag_ctx:
+                    _, _ev1 = lag_ctx[idx1]
+                    _lv1 = lag_syms[idx1]
+                    lines.append(f"        for {_ev1}, {idx1} in enumerate({domain[1]}):")
+                    if _lv1 < 0:
+                        lines.append(f"            if {_ev1} < {-_lv1}: continue")
+                    else:
+                        lines.append(f"            if {_ev1} + {_lv1} >= len({domain[1]}): continue")
+                else:
+                    lines.append(f"        for {idx1} in {domain[1]}:")
                 guard = self._constraint_diagonal_guard(domain, [idx0, idx1])
                 if guard:
                     lines.append(f"            if {guard}: continue")
@@ -832,7 +1055,16 @@ class IRCompiler:
             else:
                 idx_vars = self._domain_idx_vars(domain, index_map)
                 for k, (iv, s) in enumerate(zip(idx_vars, domain)):
-                    lines.append(f"    {'    ' * k}for {iv} in {s}:")
+                    if iv in lag_ctx:
+                        _, _ev = lag_ctx[iv]
+                        _lv = lag_syms[iv]
+                        lines.append(f"    {'    ' * k}for {_ev}, {iv} in enumerate({s}):")
+                        if _lv < 0:
+                            lines.append(f"    {'    ' * (k + 1)}if {_ev} < {-_lv}: continue")
+                        else:
+                            lines.append(f"    {'    ' * (k + 1)}if {_ev} + {_lv} >= len({s}): continue")
+                    else:
+                        lines.append(f"    {'    ' * k}for {iv} in {s}:")
                 inner = "    " * (len(domain) + 1)
                 guard = self._constraint_diagonal_guard(domain, idx_vars)
                 if guard:
@@ -1100,10 +1332,18 @@ class IRCompiler:
             sense_c = cmeta.get("sense", "<=")
             rhs_node = cmeta["rhs"]
             domain_loop_vars = set(self._domain_idx_vars(domain, index_map)) if domain else set()
+            lag_syms: dict[str, int] = {}
+            lag_syms.update(self._collect_lag_symbols(cmeta["expression"], variables, parameters, sets))
+            lag_syms.update(self._collect_lag_symbols(rhs_node, variables, parameters, sets))
+            lag_ctx = self._build_lag_context(lag_syms, sets) if lag_syms else {}
 
-            # Helper to emit the constraint body (ct declaration + SetCoefficient calls)
-            # at a given indent level, with rhs already in scope as a Python expression.
-            def _emit_ct_body(rhs_expr: str, ct_indent: int, name_expr: str, extra_known: set[str] | None = None) -> None:
+            def _emit_ct_body(
+                rhs_expr: str,
+                ct_indent: int,
+                name_expr: str,
+                extra_known: set[str] | None = None,
+                _lc: dict | None = None,
+            ) -> None:
                 pad = "    " * ct_indent
                 if sense_c == "<=":
                     lines.append(
@@ -1129,45 +1369,84 @@ class IRCompiler:
                     lines,
                     ct_indent,
                     extra_known=extra_known,
+                    lag_context=_lc,
                 )
 
             if not domain:
-                rhs_expr = self._emit_expr(rhs_node, index_map, variables, parameters)
-                _emit_ct_body(rhs_expr, ct_indent=1, name_expr=repr(cname))
+                rhs_expr = self._emit_expr(rhs_node, index_map, variables, parameters, lag_context=lag_ctx or None)
+                _emit_ct_body(rhs_expr, ct_indent=1, name_expr=repr(cname), _lc=lag_ctx or None)
             elif len(domain) == 1:
                 idx0 = index_map[domain[0]]
-                lines.append(f"    for {idx0} in {domain[0]}:")
-                rhs_expr = self._emit_expr(rhs_node, index_map, variables, parameters, extra_known=domain_loop_vars)
-                _emit_ct_body(rhs_expr, ct_indent=2, name_expr=f"f\"{cname}_{{{idx0}}}\"", extra_known=domain_loop_vars)
+                if idx0 in lag_ctx:
+                    _, _ev0 = lag_ctx[idx0]
+                    _lv0 = lag_syms[idx0]
+                    lines.append(f"    for {_ev0}, {idx0} in enumerate({domain[0]}):")
+                    if _lv0 < 0:
+                        lines.append(f"        if {_ev0} < {-_lv0}: continue")
+                    else:
+                        lines.append(f"        if {_ev0} + {_lv0} >= len({domain[0]}): continue")
+                else:
+                    lines.append(f"    for {idx0} in {domain[0]}:")
+                rhs_expr = self._emit_expr(rhs_node, index_map, variables, parameters, extra_known=domain_loop_vars, lag_context=lag_ctx or None)
+                _emit_ct_body(rhs_expr, ct_indent=2, name_expr=f"f\"{cname}_{{{idx0}}}\"", extra_known=domain_loop_vars, _lc=lag_ctx or None)
             elif len(domain) == 2:
                 idx0, idx1 = self._domain_idx_vars(domain, index_map)
-                lines.append(f"    for {idx0} in {domain[0]}:")
-                lines.append(f"        for {idx1} in {domain[1]}:")
+                if idx0 in lag_ctx:
+                    _, _ev0 = lag_ctx[idx0]
+                    _lv0 = lag_syms[idx0]
+                    lines.append(f"    for {_ev0}, {idx0} in enumerate({domain[0]}):")
+                    if _lv0 < 0:
+                        lines.append(f"        if {_ev0} < {-_lv0}: continue")
+                    else:
+                        lines.append(f"        if {_ev0} + {_lv0} >= len({domain[0]}): continue")
+                else:
+                    lines.append(f"    for {idx0} in {domain[0]}:")
+                if idx1 in lag_ctx:
+                    _, _ev1 = lag_ctx[idx1]
+                    _lv1 = lag_syms[idx1]
+                    lines.append(f"        for {_ev1}, {idx1} in enumerate({domain[1]}):")
+                    if _lv1 < 0:
+                        lines.append(f"            if {_ev1} < {-_lv1}: continue")
+                    else:
+                        lines.append(f"            if {_ev1} + {_lv1} >= len({domain[1]}): continue")
+                else:
+                    lines.append(f"        for {idx1} in {domain[1]}:")
                 guard = self._constraint_diagonal_guard(domain, [idx0, idx1])
                 if guard:
                     lines.append(f"            if {guard}: continue")
-                rhs_expr = self._emit_expr(rhs_node, index_map, variables, parameters, extra_known=domain_loop_vars)
+                rhs_expr = self._emit_expr(rhs_node, index_map, variables, parameters, extra_known=domain_loop_vars, lag_context=lag_ctx or None)
                 _emit_ct_body(
                     rhs_expr,
                     ct_indent=3,
                     name_expr=f"f\"{cname}_{{{idx0}}}_{{{idx1}}}\"",
                     extra_known=domain_loop_vars,
+                    _lc=lag_ctx or None,
                 )
             else:
                 idx_vars = self._domain_idx_vars(domain, index_map)
                 for k, (iv, s) in enumerate(zip(idx_vars, domain)):
-                    lines.append(f"    {'    ' * k}for {iv} in {s}:")
+                    if iv in lag_ctx:
+                        _, _ev = lag_ctx[iv]
+                        _lv = lag_syms[iv]
+                        lines.append(f"    {'    ' * k}for {_ev}, {iv} in enumerate({s}):")
+                        if _lv < 0:
+                            lines.append(f"    {'    ' * (k + 1)}if {_ev} < {-_lv}: continue")
+                        else:
+                            lines.append(f"    {'    ' * (k + 1)}if {_ev} + {_lv} >= len({s}): continue")
+                    else:
+                        lines.append(f"    {'    ' * k}for {iv} in {s}:")
                 name_parts = "\\x1f".join(f"{{{iv}}}" for iv in idx_vars)
                 guard = self._constraint_diagonal_guard(domain, idx_vars)
                 if guard:
                     inner_pad = "    " * (len(domain) + 1)
                     lines.append(f"{inner_pad}if {guard}: continue")
-                rhs_expr = self._emit_expr(rhs_node, index_map, variables, parameters, extra_known=domain_loop_vars)
+                rhs_expr = self._emit_expr(rhs_node, index_map, variables, parameters, extra_known=domain_loop_vars, lag_context=lag_ctx or None)
                 _emit_ct_body(
                     rhs_expr,
                     ct_indent=len(domain) + 1,
                     name_expr=f"f\"{cname}_{name_parts}\"",
                     extra_known=domain_loop_vars,
+                    _lc=lag_ctx or None,
                 )
 
         # LP export + solve + result

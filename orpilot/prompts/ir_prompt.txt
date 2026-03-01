@@ -38,9 +38,15 @@ SETS
     "source": string or null,
     "column": string or null,
     "size_source": string or null,
-    "size_column": string or null
+    "size_column": string or null,
+    "ordered": true or false
   }
 }
+
+- ordered: set to true when the set represents a time sequence (e.g. Months, Periods,
+  Weeks, Shifts) and constraints need to reference the previous or next period value via
+  a "lag" field (see TEMPORAL LAG and EXPRESSION NODES below). Default: false (omit or
+  set false for all other sets).
 
 - Infer what sets you need from the problem description.
 - A set can be populated in one of three ways — choose the first that applies:
@@ -390,26 +396,33 @@ ALLOWED EXPRESSION NODES
 {
   "type": "variable",
   "name": string,
-  "indices": [string]
+  "indices": [string],
+  "lag": integer  (optional, default 0)
 }
 
 - Each element in indices must be either (a) a declared index_symbol of a set that is
   in scope (from the enclosing constraint domain or an enclosing indexed_sum.over), or
   (b) a hardcoded string that is a real member ID of the set (e.g. "depot").
 - Name must match a declared VariableName in variables.
+- lag: non-zero only for temporal back/forward references (see TEMPORAL LAG section).
+  "lag": -1 references the previous period; "lag": 1 references the next period.
+  The index being lagged must correspond to an ordered set (ordered: true).
+  Only use lag in constraint expressions, never in the objective.
 
 3) Parameter
 
 {
   "type": "parameter",
   "name": string,
-  "indices": [string]
+  "indices": [string],
+  "lag": integer  (optional, default 0)
 }
 
 - Each element in indices must be either (a) a declared index_symbol of a set that is
   in scope (from the enclosing constraint domain or an enclosing indexed_sum.over), or
   (b) a hardcoded string that is a real member ID of the set (e.g. "depot").
 - Name must match a declared ParameterName in parameters.
+- lag: same rules as for variable nodes above.
 
 4) Binary Operation
 
@@ -472,6 +485,180 @@ STRICT RULES FOR EXPRESSION NODES
 - Do NOT add extra keys.
 
 
+
+========================================================
+TEMPORAL LAG (inventory / scheduling balance constraints)
+========================================================
+
+Use temporal lag when a constraint links consecutive periods, for example:
+  inventory[t] = inventory[t-1] + production[t] - demand[t]
+
+Pattern:
+
+1. Mark the time set as ordered:
+     "Months": { ..., "ordered": true }
+
+2. Split into TWO constraints:
+
+   a. First-period constraint (domain: []) — scalar, pins t=first_member:
+        expression: variable inventory at the first period member (hardcoded ID)
+        sense: "="
+        rhs: initial_inventory parameter or constant
+      Use the actual first member ID from csv_schemas as a hardcoded index (e.g. "Jan").
+
+   b. Subsequent-period balance (domain: ["Months"]) — uses lag:
+        expression: subtract(subtract(inventory[t], inventory[t-1 lag]), production[t])
+        sense: "="
+        rhs: subtract(constant 0, demand[t])   OR move demand to LHS via subtract
+      Encode inventory[t-1] with "lag": -1 on the variable node:
+        { "type": "variable", "name": "inventory", "indices": ["t"], "lag": -1 }
+      The compiler emits:
+        for _idx_t, t in enumerate(Months):
+            if _idx_t < 1: continue   ← boundary guard skips first period
+            prob += inventory[Months[_idx_t - 1]] ...
+
+3. Rules:
+   - Only the CONSTRAINT with the lagged node needs "ordered": true on the set.
+   - The lag index ("t" in the example) must be the index_symbol of the ordered set,
+     and that set must be in the constraint's domain.
+   - "lag": -1 references one step back; "lag": 1 references one step forward.
+   - Do NOT use lag in the objective.
+   - Do NOT use lag inside indexed_sum.over bodies — lag is only for outer domain loops.
+   - The RHS must remain constant/parameter-only (no variables). If needed, move
+     lagged variable terms into the LHS expression via subtract.
+
+INVENTORY PLANNING EXAMPLE (abridged):
+
+Sets:
+  "Months": { "ordered": true, "index_symbol": "t", "source": "...", "column": "month_id" }
+
+Variables:
+  "inventory": { "domain": ["Months"], "type": "continuous", "lower_bound": 0, ... }
+  "production": { "domain": ["Months"], "type": "continuous", "lower_bound": 0, ... }
+
+Parameters:
+  "demand":           { "domain": ["Months"], ... }
+  "initial_inventory": { "domain": [], ... }   ← scalar
+
+Constraints:
+  "inventory_init": {
+    "domain": [],
+    "expression": { "type": "variable", "name": "inventory", "indices": ["Jan"] },
+    "sense": "=",
+    "rhs": { "type": "parameter", "name": "initial_inventory", "indices": [] }
+  }
+  "inventory_balance": {
+    "domain": ["Months"],
+    "expression": {
+      "operation": "subtract",
+      "left": {
+        "operation": "subtract",
+        "left":  { "type": "variable", "name": "inventory", "indices": ["t"] },
+        "right": { "type": "variable", "name": "inventory", "indices": ["t"], "lag": -1 }
+      },
+      "right": { "type": "variable", "name": "production", "indices": ["t"] }
+    },
+    "sense": "=",
+    "rhs": {
+      "operation": "multiply",
+      "left":  { "type": "constant", "value": -1 },
+      "right": { "type": "parameter", "name": "demand", "indices": ["t"] }
+    }
+  }
+
+Note: The LHS is inventory[t] - inventory[t-1] - production[t].
+      The RHS is -demand[t] (written as -1 * demand[t] since RHS may not contain variables).
+      The boundary guard `if _idx_t < 1: continue` is emitted automatically by the compiler.
+
+CRITICAL for buying/inventory models with a warehouse capacity limit:
+When the problem says purchases happen at the BEGINNING of the period and there is a
+warehouse capacity, the capacity is reached AFTER purchasing (before selling). You MUST
+include the after-purchase capacity constraint:
+
+  For t=first_period: purchase[first_id] + initial_inventory ≤ warehouse_capacity
+  For t>1:            purchase[t] + inventory[t-1] ≤ warehouse_capacity  (use lag: -1)
+
+Without this constraint the model is UNBOUNDED: whenever sell_price > buy_price, the
+solver can increase purchase and sell by the same δ each period, gaining (sell_price −
+buy_price) × δ → ∞ while inventory stays unchanged.
+
+Example IR for the after-purchase constraint pair:
+
+  "purchase_capacity_init": {
+    "domain": [],
+    "expression": {
+      "operation": "sum",
+      "left": { "type": "variable", "name": "purchase", "indices": ["first_month_id"] },
+      "right": { "type": "parameter", "name": "initial_inventory", "indices": [] }
+    },
+    "sense": "<=",
+    "rhs": { "type": "parameter", "name": "warehouse_capacity", "indices": [] }
+  },
+  "purchase_capacity": {
+    "domain": ["Months"],
+    "expression": {
+      "operation": "sum",
+      "left": { "type": "variable", "name": "purchase", "indices": ["t"] },
+      "right": { "type": "variable", "name": "inventory", "indices": ["t"], "lag": -1 }
+    },
+    "sense": "<=",
+    "rhs": { "type": "parameter", "name": "warehouse_capacity", "indices": [] }
+  }
+
+Replace "first_month_id" with the actual first member ID from csv_schemas (e.g. "1", "Jan").
+
+========================================================
+COST PER UNIT vs COST PER TRANSACTION
+========================================================
+
+When the problem gives a cost per unit (e.g., "$40 per chair") but the decision variable
+counts transactions (e.g., number of orders, each containing several units), the objective
+coefficient is cost_per_unit × units_per_transaction, not just cost_per_unit.
+
+Example: "Each order from C includes 10 chairs at $40/chair" → cost per ORDER = $40 × 10 = $400.
+If the IR variable is orders[m] (integer count of orders), the objective body must be:
+
+  multiply(
+    multiply(cost_per_chair[m], chairs_per_order[m]),
+    orders[m]
+  )
+
+NOT: multiply(cost_per_chair[m], orders[m])   ← WRONG: ignores chairs_per_order scale
+
+The multiply of two parameters is allowed. Always check whether a stated unit cost
+corresponds to the unit of the decision variable. If not, introduce the scale factor.
+
+Alternatively, you may define a derived scalar in the data (e.g. total_cost_per_order) and
+have the param_computation step compute it. But expressing the multiplication directly in
+the IR via nested multiply nodes is preferred when both parameters are in the same CSV.
+
+========================================================
+BINARY SELECTION LINKING (subset variables)
+========================================================
+
+When a binary variable y[SubSet] indicates whether a subset entity is "selected", and a
+continuous variable x[SuperSet] measures the amount allocated to each item in the superset,
+the linking constraint must use x[sub_index] (the amount of the SPECIFIC subset entity),
+not sum(x[f] for f in SuperSet).
+
+Example: FoodItems superset, Proteins subset. x[FoodItems] = grams of each food.
+         y[Proteins] = 1 if protein p is selected (exactly one protein chosen).
+
+CORRECT linking constraint — for each protein p:
+  x[p] ≤ M * y[p]   →  domain: ["Proteins"], expression: subtract(x[p], multiply(M, y[p])) ≤ 0
+
+WRONG: sum(x[f] for f in FoodItems) - M * y[p] = 0 for each p
+  (this links the TOTAL food amount to every binary individually → infeasible when |Proteins| > 1)
+
+In the IR, accessing x[p] where p ∈ Proteins and x has domain FoodItems is valid as long as
+Proteins member IDs are a subset of FoodItems member IDs. The index "p" (Proteins loop var)
+resolves to an actual food ID string that is a valid key in the x dict.
+
+This pattern applies to:
+  - Exactly-one protein selection with linking to grams
+  - At-least-k vegetable selection with linking to grams
+  - Binary facility opening y[j] linked to flow variables x[i,j] (supply chain)
+  - Any case where a subset binary controls the usage of a superset continuous variable
 
 ========================================================
 EXAMPLE

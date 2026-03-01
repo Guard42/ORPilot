@@ -10,7 +10,6 @@ def after_interview(state: WorkflowState) -> str:
     """Route after interview node."""
     if state.get("problem") is not None:
         return "data_collection"
-    # Still interviewing — need more user input
     return "wait_for_input"
 
 
@@ -21,35 +20,29 @@ def after_data_collection(state: WorkflowState) -> str:
     return "wait_for_input"
 
 
-def after_ir_compiler(state: WorkflowState) -> str:
-    """Route after IR compilation."""
-    if not state.get("error_context"):
-        return "solver_runner"
-
-    # Compilation failed — check retry budget
-    retry_count = state.get("retry_count", 0)
-    max_retries = state.get("max_retries", 3)
-    if retry_count < max_retries:
-        return "ir_builder"
-
-    return "reporter"
+def after_direct_code_gen(state: WorkflowState) -> str:
+    """Route after direct code gen: solver_runner on success, reporter on hard failure."""
+    if state.get("current_node") == "reporter":
+        return "reporter"
+    return "solver_runner"
 
 
 def after_solver_runner(state: WorkflowState) -> str:
     """Route after solver execution."""
     solution = state.get("solution")
     if solution is None:
-        return "ir_builder"
+        return "direct_code_gen"
 
     if solution.status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE):
+        # Success — optionally generate IR blueprint before reporting
+        if state.get("generate_ir", False):
+            return "ir_builder_on_demand"
         return "reporter"
 
     # Failed — check retry budget
     retry_count = state.get("retry_count", 0)
     max_retries = state.get("max_retries", 3)
     if retry_count < max_retries:
-        # Recompiling the same IR is pointless — go back to the LLM to fix the IR
-        return "ir_builder"
+        return "direct_code_gen"
 
-    # Exhausted retries — report the failure
     return "reporter"

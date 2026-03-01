@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from langgraph.graph import StateGraph, END
 
 from orpilot.llm.base import BaseLLM
@@ -12,8 +10,8 @@ from orpilot.workflow.state import WorkflowState
 from orpilot.workflow.nodes.interview import interview_node
 from orpilot.workflow.nodes.data_collection import data_collection_node
 from orpilot.workflow.nodes.param_computation import param_computation_node
-from orpilot.workflow.nodes.ir_builder import ir_builder_node
-from orpilot.workflow.nodes.ir_compiler_node import ir_compiler_node
+from orpilot.workflow.nodes.direct_code_gen import direct_code_gen_node
+from orpilot.workflow.nodes.ir_builder import ir_builder_on_demand_node
 from orpilot.workflow.nodes.solver_runner import solver_runner_node
 from orpilot.workflow.nodes.reporter import reporter_node
 from orpilot.workflow import edges
@@ -24,6 +22,12 @@ def build_graph(
     llm_config: LLMConfig | None = None,
 ) -> StateGraph:
     """Build the ORPilot workflow graph.
+
+    Default path: interview → data_collection → param_computation →
+                  direct_code_gen → solver_runner → reporter
+
+    Optional on-demand IR (when generate_ir=True in state):
+                  solver_runner → ir_builder_on_demand → reporter
 
     Args:
         llm: Pre-configured LLM instance. If None, created from llm_config.
@@ -37,13 +41,13 @@ def build_graph(
 
     graph = StateGraph(WorkflowState)
 
-    # Add nodes — bind the LLM where needed
+    # Add nodes
     graph.add_node("interview", lambda state: interview_node(state, llm))
     graph.add_node("data_collection", lambda state: data_collection_node(state, llm))
     graph.add_node("param_computation", lambda state: param_computation_node(state, llm))
-    graph.add_node("ir_builder", lambda state: ir_builder_node(state, llm))
-    graph.add_node("ir_compiler", lambda state: ir_compiler_node(state, llm))
+    graph.add_node("direct_code_gen", lambda state: direct_code_gen_node(state, llm))
     graph.add_node("solver_runner", lambda state: solver_runner_node(state))
+    graph.add_node("ir_builder_on_demand", lambda state: ir_builder_on_demand_node(state, llm))
     graph.add_node("reporter", lambda state: reporter_node(state, llm))
 
     # A no-op node that signals "waiting for user input"
@@ -52,24 +56,24 @@ def build_graph(
     # Set entry point
     graph.set_entry_point("interview")
 
-    # Add conditional edges
+    # Edges
     graph.add_conditional_edges("interview", edges.after_interview)
     graph.add_conditional_edges("data_collection", edges.after_data_collection)
 
-    # param_computation → ir_builder (always, even if no computation was done)
-    graph.add_edge("param_computation", "ir_builder")
+    # param_computation → direct_code_gen (always)
+    graph.add_edge("param_computation", "direct_code_gen")
 
-    # ir_builder → ir_compiler → solver_runner (or back to ir_builder on compile error)
-    graph.add_edge("ir_builder", "ir_compiler")
-    graph.add_conditional_edges("ir_compiler", edges.after_ir_compiler)
+    # direct_code_gen → solver_runner (or reporter on hard failure)
+    graph.add_conditional_edges("direct_code_gen", edges.after_direct_code_gen)
 
-    # solver_runner routes based on result
+    # solver_runner → reporter | ir_builder_on_demand | direct_code_gen (retry)
     graph.add_conditional_edges("solver_runner", edges.after_solver_runner)
 
-    # reporter is terminal
-    graph.add_edge("reporter", END)
+    # ir_builder_on_demand → reporter (always, IR is optional — never blocks)
+    graph.add_edge("ir_builder_on_demand", "reporter")
 
-    # wait_for_input is terminal (caller feeds input and re-invokes)
+    # Terminal nodes
+    graph.add_edge("reporter", END)
     graph.add_edge("wait_for_input", END)
 
     return graph.compile()

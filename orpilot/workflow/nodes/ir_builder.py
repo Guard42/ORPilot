@@ -110,4 +110,72 @@ def ir_builder_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
                 "content": f"Validation failed: {exc}. Return corrected JSON only.",
             })
 
-    raise RuntimeError("IR builder failed after 3 attempts")
+    return {
+        **state,
+        "report": (
+            "The model could not be built after 3 attempts. "
+            "Please refine your problem description or data and try again."
+        ),
+        "current_node": "reporter",
+    }
+
+
+def ir_builder_on_demand_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
+    """Generate IR on-demand from the problem description + working Python code.
+
+    Called after a successful solve to produce a solver-agnostic IR blueprint that
+    can be compiled to a different solver without another LLM call.
+    The generated Python code is included so the LLM uses it as a structural
+    reference rather than re-interpreting the problem description from scratch.
+    On failure the node simply skips IR (the solve was already successful).
+    """
+    problem = state["problem"]
+    user_data = state.get("user_data")
+    generated_code = state.get("generated_code", "")
+
+    csv_schemas: dict[str, list[str]] = {}
+    if user_data and user_data.csv_specs:
+        for spec in user_data.csv_specs:
+            stem = Path(spec.filename).stem
+            csv_schemas[stem] = [c.name for c in spec.columns]
+
+    user_payload: dict = {"problem": json.loads(problem.model_dump_json())}
+    if csv_schemas:
+        user_payload["csv_schemas"] = csv_schemas
+
+    code_block = f"```python\n{generated_code}\n```" if generated_code else ""
+    messages = [
+        {"role": "system", "content": ir_builder_prompts.SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                json.dumps(user_payload) + "\n\n"
+                "The following Python solver code already solves this problem correctly. "
+                "Use it as a structural reference (sets, variables, parameters, constraints, "
+                "objective direction) to generate the IR. The IR must be solver-agnostic — "
+                "extract the abstract model structure, do not transliterate solver-specific "
+                "syntax (e.g. PuLP's lpSum or LpVariable).\n\n"
+                f"{code_block}\n\n"
+                "Return JSON IR only."
+            ),
+        },
+    ]
+
+    for attempt in range(3):
+        response = llm.chat(messages)
+        try:
+            ir_dict = json.loads(_strip_fences(response))
+            if ir_dict.get("error") == "UNSUPPORTED_MODEL":
+                # Solve already succeeded — IR is optional, just skip
+                return {**state, "current_node": "ir_builder_on_demand"}
+            IRModel.model_validate(ir_dict)
+            return {**state, "ir_model": ir_dict, "current_node": "ir_builder_on_demand"}
+        except Exception as exc:
+            messages.append({"role": "assistant", "content": response})
+            messages.append({
+                "role": "user",
+                "content": f"Validation failed: {exc}. Return corrected JSON only.",
+            })
+
+    # IR generation failed — not a blocker, solve already succeeded
+    return {**state, "current_node": "ir_builder_on_demand"}

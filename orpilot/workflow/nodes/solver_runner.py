@@ -27,10 +27,19 @@ def solver_runner_node(state: WorkflowState) -> WorkflowState:
     }
 
     # If solve failed, set error context for retry
-    if solution.status in (SolveStatus.ERROR, SolveStatus.INFEASIBLE):
+    if solution.status in (SolveStatus.ERROR, SolveStatus.INFEASIBLE, SolveStatus.UNBOUNDED):
         retry_count = state.get("retry_count", 0) + 1
         updates["retry_count"] = retry_count
-        error_msg = solution.error_message or solution.solver_output
+        if solution.status == SolveStatus.UNBOUNDED:
+            error_msg = (
+                "The model is unbounded — the objective can grow to infinity. "
+                "A variable or combination of variables is unconstrained in the objective "
+                "direction. Check that all variables are bounded by constraints (e.g. "
+                "warehouse capacity limits purchases, demand limits production). "
+                "Add any missing upper-bound constraints."
+            )
+        else:
+            error_msg = solution.error_message or solution.solver_output
         updates["error_context"] = (
             f"Solve failed with status={solution.status.value}. "
             f"Error: {error_msg}"

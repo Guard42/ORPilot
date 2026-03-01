@@ -16,6 +16,10 @@ class IRSet(BaseModel):
     # When set, the compiler emits list(range(int(data[size_source][0][size_column]))).
     size_source: str | None = None
     size_column: str | None = None
+    # When True, the set has a meaningful ordering and its members support lag references
+    # (e.g. Months, Periods, Shifts).  The compiler emits enumerate() loops for any
+    # constraint that contains a variable/parameter node with a non-zero "lag" field.
+    ordered: bool = False
 
 
 class IRParameter(BaseModel):

@@ -36,12 +36,15 @@ def param_computation_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
     table_schemas = _describe_tables(user_data)
     problem_json = problem.model_dump_json(indent=2) if problem else "{}"
 
-    prompt = prompts.SYSTEM_PROMPT.format(
+    user_message = prompts.USER_PROMPT_TEMPLATE.format(
         problem_json=problem_json,
         table_schemas=table_schemas,
     )
 
-    messages: list[dict] = [{"role": "system", "content": prompt}]
+    messages: list[dict] = [
+        {"role": "system", "content": prompts.SYSTEM_PROMPT},
+        {"role": "user", "content": user_message},
+    ]
     output_files: list[dict] = []
     for attempt in range(3):
         response = llm.chat(messages)
@@ -88,6 +91,7 @@ def param_computation_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
         new_paths = {
             Path(f["filename"]).stem: str((Path(data_dir) / f["filename"]).resolve())
             for f in output_files
+            if (Path(data_dir) / f["filename"]).is_file()
         }
         merged_paths = {**(problem.csv_file_paths or {}), **new_paths}
         updates["problem"] = problem.model_copy(update={"csv_file_paths": merged_paths})
@@ -138,6 +142,7 @@ def _run_computation(
         "csv": csv,
         "math": math,
         "itertools": itertools,
+        "Path": Path,
     }
     try:
         exec(code, namespace)  # noqa: S102

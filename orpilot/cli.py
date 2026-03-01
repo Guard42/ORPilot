@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import json
 import os
-import tomllib
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +17,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 
+from orpilot.config import discover_config_file, load_config_file
 from orpilot.llm.config import LLMConfig, get_llm
 from orpilot.paths import DATA_DIR
 from orpilot.workflow.graph import build_graph
@@ -31,36 +31,22 @@ app = typer.Typer(
 )
 console = Console()
 
-_AUTO_CONFIG_NAMES = ("orpilot.toml", "orpilot.json")
+def _version_callback(value: bool) -> None:
+    if value:
+        from orpilot import __version__  # type: ignore[attr-defined]
+        typer.echo(f"orpilot {__version__}")
+        raise typer.Exit()
 
 
-def _load_config_file(path: Path) -> dict:
-    """Load config values from a TOML or JSON file."""
-    if path.suffix.lower() == ".json":
-        return json.loads(path.read_text(encoding="utf-8"))
-    with open(path, "rb") as f:
-        return tomllib.load(f)
+@app.callback()
+def main(
+    version: Optional[bool] = typer.Option(
+        None, "--version", "-V", callback=_version_callback, is_eager=True,
+        help="Show the version and exit.",
+    ),
+) -> None:
+    pass
 
-
-def _discover_config_file() -> Path | None:
-    """Locate a config file via ORPILOT_CONFIG env var or by walking up from CWD."""
-    # 1. Explicit env var (absolute path, works regardless of working directory)
-    env_path = os.environ.get("ORPILOT_CONFIG")
-    if env_path:
-        return Path(env_path)
-
-    # 2. Walk up from CWD (like git looking for .git)
-    current = Path.cwd()
-    while True:
-        for name in _AUTO_CONFIG_NAMES:
-            candidate = current / name
-            if candidate.exists():
-                return candidate
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return None
 
 # ---------------------------------------------------------------------------
 # Logging helpers
@@ -69,18 +55,19 @@ def _discover_config_file() -> Path | None:
 _NODE_LABELS: dict[str, tuple[str, str]] = {
     "interview": ("blue", "Conducting interview..."),
     "data_collection": ("blue", "Collecting data..."),
-    "ir_builder": ("yellow", "Starting model building (translating problem to IR)..."),
-    "ir_compiler": ("yellow", "Compiling IR to solver code..."),
+    "param_computation": ("blue", "Computing derived parameters..."),
+    "direct_code_gen": ("yellow", "Generating solver code..."),
     "solver_runner": ("yellow", "Starting model solving..."),
+    "ir_builder_on_demand": ("dim", "Generating IR blueprint..."),
     "reporter": ("green", "Generating solution report..."),
 }
 
 _NODE_COMPLETE_LABELS: dict[str, tuple[str, str]] = {
     "interview": ("green", "Interview finished — problem defined."),
     "data_collection": ("green", "Data collection finished — all CSV files loaded."),
-    "ir_builder": ("green", "IR model built."),
-    "ir_compiler": ("green", "Model building finished — solver code ready."),
+    "direct_code_gen": ("green", "Solver code generated."),
     "solver_runner": ("green", "Model solving finished."),
+    "ir_builder_on_demand": ("green", "IR blueprint saved."),
 }
 
 
@@ -272,8 +259,10 @@ def run(
     time_limit: Optional[int] = typer.Option(None, "--time-limit", "-t", help="Max solver run time in seconds. Stops early and returns best solution found."),
     show_solver_log: Optional[bool] = typer.Option(None, "--solver-log/--no-solver-log", help="Stream the solver log to stdout."),
     verbose: Optional[bool] = typer.Option(None, "--verbose/--no-verbose", help="Show full solver and compiler error details"),
+    generate_ir: Optional[bool] = typer.Option(None, "--generate-ir/--no-generate-ir", help="After a successful solve, generate an IR blueprint for solver portability"),
     api_key: Optional[str] = typer.Option(None, "--api-key", envvar="OPENAI_API_KEY"),
     base_url: Optional[str] = typer.Option(None, "--base-url", envvar="OPENAI_BASE_URL", help="Custom API base URL (e.g. https://api.deepseek.com)"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="LLM sampling temperature (0.0 = deterministic)"),
 ) -> None:
     """Start an interactive ORPilot session."""
     # --- Load config file ---
@@ -281,22 +270,24 @@ def run(
     cfg: dict = {}
     resolved_config = config_file
     if resolved_config is None:
-        resolved_config = _discover_config_file()
+        resolved_config = discover_config_file()
     if resolved_config is not None:
         if not resolved_config.exists():
             console.print(f"[red]Config file not found: {resolved_config}[/red]")
             raise typer.Exit(1)
-        cfg = _load_config_file(resolved_config)
+        cfg = load_config_file(resolved_config)
         console.print(f"[dim]Loaded config from {resolved_config}[/dim]")
 
     # --- Merge: CLI values > config file values > hardcoded defaults ---
-    provider        = provider        or cfg.get("provider",         "openai")
-    model           = model           or cfg.get("model")
-    solver          = solver          or cfg.get("solver",           "pulp")
+    provider        = provider        or cfg.get("provider")        or os.environ.get("ORPILOT_LLM_PROVIDER", "openai")
+    model           = model           or cfg.get("model")           or os.environ.get("ORPILOT_MODEL")
+    solver          = solver          or cfg.get("solver")          or os.environ.get("ORPILOT_DEFAULT_SOLVER", "pulp")
     max_retries     = max_retries     if max_retries     is not None else cfg.get("max_retries",     3)
     time_limit      = time_limit      if time_limit      is not None else cfg.get("time_limit",      300)
     verbose         = verbose         if verbose         is not None else cfg.get("verbose",         False)
     show_solver_log = show_solver_log if show_solver_log is not None else cfg.get("show_solver_log", False)
+    generate_ir     = generate_ir     if generate_ir     is not None else cfg.get("generate_ir",     False)
+    temperature     = temperature     if temperature     is not None else cfg.get("temperature",     0.0)
     base_url        = base_url        or cfg.get("base_url")
     api_key         = api_key         or cfg.get("api_key")
 
@@ -312,7 +303,7 @@ def run(
     elif output_dir is not None:
         output_dir = output_dir.resolve()
 
-    llm_config = LLMConfig(provider=provider, model=model, api_key=api_key, base_url=base_url)
+    llm_config = LLMConfig(provider=provider, model=model, api_key=api_key, base_url=base_url, temperature=temperature)
     llm = get_llm(llm_config)
     graph = build_graph(llm=llm)
 
@@ -347,6 +338,7 @@ def run(
         "output_dir": output_dir_str,
         "solver_time_limit": time_limit,
         "show_solver_log": show_solver_log,
+        "generate_ir": generate_ir,
     }
 
     # Load problem from file if provided
@@ -361,7 +353,7 @@ def run(
         data = UserData.model_validate_json(data_file.read_text())
         state["user_data"] = data
         if state.get("problem"):
-            state["current_node"] = "ir_builder"
+            state["current_node"] = "direct_code_gen"
         console.print(Panel("Loaded data from file", title="Data"))
 
     console.print(Panel(
@@ -410,33 +402,17 @@ def run(
                         style, msg = _NODE_COMPLETE_LABELS["data_collection"]
                         console.print(f"[{style}]✓ {msg}[/{style}]")
 
-                elif node_name == "ir_builder":
-                    if state.get("ir_model"):
-                        style, msg = _NODE_COMPLETE_LABELS["ir_builder"]
+                elif node_name == "direct_code_gen":
+                    if state.get("generated_code") and not state.get("error_context"):
+                        style, msg = _NODE_COMPLETE_LABELS["direct_code_gen"]
                         console.print(f"[{style}]✓ {msg}[/{style}]")
 
-                elif node_name == "ir_compiler":
-                    error = state.get("error_context", "")
-                    if not error:
-                        style, msg = _NODE_COMPLETE_LABELS["ir_compiler"]
+                elif node_name == "ir_builder_on_demand":
+                    if state.get("ir_model"):
+                        style, msg = _NODE_COMPLETE_LABELS["ir_builder_on_demand"]
                         console.print(f"[{style}]✓ {msg}[/{style}]")
                     else:
-                        retry = state.get("retry_count", 0)
-                        max_r = state.get("max_retries", 3)
-                        if verbose:
-                            console.print(Panel(
-                                error,
-                                title=f"[red]✗ Compiler error (attempt {retry}/{max_r})[/red]",
-                                border_style="red",
-                            ))
-                        else:
-                            first_line = error.split("\n")[0][:200]
-                            console.print(
-                                f"[red]✗ Compiler error (attempt {retry}/{max_r}): "
-                                f"{first_line}[/red]"
-                            )
-                            console.print("[dim]   (use --verbose / -v to see full details)[/dim]")
-                        console.print("[yellow]   Retrying with error feedback...[/yellow]")
+                        console.print("[dim]  (IR generation skipped or failed — solve result unaffected)[/dim]")
 
                 elif node_name == "solver_runner":
                     solution = state.get("solution")
@@ -522,6 +498,260 @@ def config() -> None:
     console.print(f"Default Solver: {os.getenv('ORPILOT_DEFAULT_SOLVER', 'pulp')}")
     console.print(f"OpenAI Key: {'set' if os.getenv('OPENAI_API_KEY') else 'not set'}")
     console.print(f"Anthropic Key: {'set' if os.getenv('ANTHROPIC_API_KEY') else 'not set'}")
+
+
+@app.command()
+def benchmark(
+    path: Path = typer.Argument(..., help="Path to a benchmark case directory"),
+    config_file: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to a TOML or JSON config file. Auto-discovered if orpilot.toml exists in the current directory."),
+    solver: Optional[str] = typer.Option(None, "--solver", "-s", help="OR solver (pulp, pyomo, ortools)"),
+    mode: Optional[str] = typer.Option(None, "--mode", help="auto|compiler|ir|full|direct"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="LLM provider (openai, anthropic)"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name override"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", envvar="OPENAI_API_KEY"),
+    base_url: Optional[str] = typer.Option(None, "--base-url", envvar="OPENAI_BASE_URL", help="Custom API base URL"),
+    timeout: Optional[int] = typer.Option(None, "--timeout", help="Timeout in seconds per case"),
+    save_ir: bool = typer.Option(False, "--save-ir", help="Save generated ir.json to case dir"),
+    verbose: Optional[bool] = typer.Option(None, "--verbose/--no-verbose", help="Show generated code on failure"),
+    generate_ir: Optional[bool] = typer.Option(None, "--generate-ir/--no-generate-ir", help="After a successful solve, generate an IR blueprint for solver portability"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="LLM sampling temperature (0.0 = deterministic)"),
+) -> None:
+    """Run a benchmark case and report pass/fail against the expected optimum."""
+    from orpilot.benchmark.loader import load_benchmark_case
+    from orpilot.benchmark.runner import BenchmarkRunner
+
+    # --- Load config file ---
+    cfg: dict = {}
+    resolved_config = config_file
+    if resolved_config is None:
+        resolved_config = discover_config_file()
+    if resolved_config is not None:
+        if not resolved_config.exists():
+            console.print(f"[red]Config file not found: {resolved_config}[/red]")
+            raise typer.Exit(1)
+        cfg = load_config_file(resolved_config)
+        console.print(f"[dim]Loaded config from {resolved_config}[/dim]")
+
+    provider     = provider     or cfg.get("provider")     or os.environ.get("ORPILOT_LLM_PROVIDER", "openai")
+    model        = model        or cfg.get("model")        or os.environ.get("ORPILOT_MODEL")
+    api_key      = api_key      or cfg.get("api_key")
+    base_url     = base_url     or cfg.get("base_url")
+    solver       = solver       or cfg.get("solver")       or os.environ.get("ORPILOT_DEFAULT_SOLVER", "pulp")
+    mode         = mode         or cfg.get("mode",        "auto")
+    timeout      = timeout      if timeout      is not None else cfg.get("timeout",      120)
+    verbose      = verbose      if verbose      is not None else cfg.get("verbose",      False)
+    generate_ir  = generate_ir  if generate_ir  is not None else cfg.get("generate_ir",  False)
+    temperature  = temperature  if temperature  is not None else cfg.get("temperature",  0.0)
+
+    path = path.resolve()
+    if not path.is_dir():
+        console.print(f"[red]Path is not a directory: {path}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        case = load_benchmark_case(path)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]Failed to load benchmark case: {exc}[/red]")
+        raise typer.Exit(1)
+
+    console.print(Panel(f"Benchmark: [bold]{case.name}[/bold]", border_style="blue"))
+    console.print(f"  Solver:      {solver}")
+    console.print(f"  Mode:        {mode}")
+    console.print(f"  Generate IR: {generate_ir}")
+    if case.expected_objective is not None:
+        console.print(f"  Expected:    {case.expected_objective} ({case.expected_status})")
+
+    # Determine effective mode — default is direct code gen
+    effective_mode = mode
+    if mode == "auto":
+        if case.ir_model is not None and case.tables is not None:
+            effective_mode = "compiler"
+        else:
+            effective_mode = "direct"
+        console.print(f"  Auto-selected mode: {effective_mode}")
+
+    # Instantiate LLM if needed
+    llm = None
+    if effective_mode != "compiler":
+        llm_config = LLMConfig(provider=provider, model=model, api_key=api_key, base_url=base_url, temperature=temperature)
+        llm = get_llm(llm_config)
+
+    runner = BenchmarkRunner(timeout=timeout)
+
+    console.print("\n[dim]Running...[/dim]")
+    if effective_mode == "compiler":
+        if case.ir_model is None:
+            console.print("[red]Mode 'compiler' requires ir.json in the case directory.[/red]")
+            raise typer.Exit(1)
+        if case.tables is None:
+            console.print("[red]Mode 'compiler' requires a data/ directory with CSV files.[/red]")
+            raise typer.Exit(1)
+        result = runner.run_compiler_only(case, case.ir_model, case.tables, solver)
+    elif effective_mode == "ir":
+        if case.tables is None:
+            console.print("[red]Mode 'ir' requires a data/ directory with CSV files.[/red]")
+            raise typer.Exit(1)
+        result = runner.run_with_ir_builder(case, case.tables, llm, solver, generate_ir=generate_ir)
+    elif effective_mode == "direct":
+        if case.tables is not None:
+            result = runner.run_direct_code_gen(case, case.tables, llm, solver, generate_ir=generate_ir)
+        else:
+            result = runner.run_direct_pipeline(case, llm, solver, generate_ir=generate_ir)
+    else:
+        # full — TextIngestor + direct code gen
+        result = runner.run_direct_pipeline(case, llm, solver, generate_ir=generate_ir)
+
+    # Save IR if requested
+    if save_ir and result.ir_model:
+        import json as _json
+        ir_out = path / "ir_generated.json"
+        ir_out.write_text(_json.dumps(result.ir_model, indent=2), encoding="utf-8")
+        console.print(f"[dim]Saved generated IR to {ir_out}[/dim]")
+
+    # Report
+    console.print()
+    if result.passed:
+        console.print(f"[green bold]PASS[/green bold]  {case.name}")
+    else:
+        console.print(f"[red bold]FAIL[/red bold]  {case.name}")
+
+    console.print(f"  Status:    {result.status}")
+    if result.objective_value is not None:
+        console.print(f"  Objective: {result.objective_value}")
+    if result.solve_time is not None:
+        console.print(f"  Time:      {result.solve_time:.2f}s")
+    if result.error:
+        if verbose:
+            console.print(Panel(result.error, title="[red]Error[/red]", border_style="red"))
+        else:
+            console.print(f"[red]  Error:     {result.error[:200]}[/red]")
+
+    if verbose and result.generated_code:
+        console.print(Panel(result.generated_code, title="Generated code", border_style="dim"))
+
+    raise typer.Exit(0 if result.passed else 1)
+
+
+@app.command(name="run-dataset")
+def run_dataset(
+    dataset: str = typer.Argument(..., help="HuggingFace dataset name, e.g. CardinalOperations/IndustryOR"),
+    config_file: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to a TOML or JSON config file. Auto-discovered if orpilot.toml exists in the current directory."),
+    split: Optional[str] = typer.Option(None, "--split", help="Dataset split to use"),
+    difficulty: Optional[str] = typer.Option(None, "--difficulty", help="Filter by difficulty: easy|medium|hard"),
+    ids: Optional[str] = typer.Option(None, "--ids", help="Comma-separated list of case IDs to run, e.g. '1,2,5'"),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Maximum number of cases to run"),
+    solver: Optional[str] = typer.Option(None, "--solver", "-s", help="OR solver (pulp, pyomo, ortools)"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="LLM provider (openai, anthropic)"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name override"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", envvar="OPENAI_API_KEY"),
+    base_url: Optional[str] = typer.Option(None, "--base-url", envvar="OPENAI_BASE_URL", help="Custom API base URL"),
+    timeout: Optional[int] = typer.Option(None, "--timeout", help="Timeout in seconds per case"),
+    verbose: Optional[bool] = typer.Option(None, "--verbose/--no-verbose", help="Show full errors"),
+    generate_ir: Optional[bool] = typer.Option(None, "--generate-ir/--no-generate-ir", help="After each successful solve, generate an IR blueprint for solver portability"),
+    save_dir: Optional[Path] = typer.Option(None, "--save-dir", help="Directory to write per-case artifacts"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="LLM sampling temperature (0.0 = deterministic)"),
+) -> None:
+    """Run benchmark cases from a HuggingFace dataset through the full pipeline."""
+    from orpilot.benchmark.loader_hf import load_hf_cases
+    from orpilot.benchmark.runner import BenchmarkRunner
+
+    # --- Load config file ---
+    cfg: dict = {}
+    resolved_config = config_file
+    if resolved_config is None:
+        resolved_config = discover_config_file()
+    if resolved_config is not None:
+        if not resolved_config.exists():
+            console.print(f"[red]Config file not found: {resolved_config}[/red]")
+            raise typer.Exit(1)
+        cfg = load_config_file(resolved_config)
+        console.print(f"[dim]Loaded config from {resolved_config}[/dim]")
+
+    provider   = provider   or cfg.get("provider")   or os.environ.get("ORPILOT_LLM_PROVIDER", "openai")
+    model      = model      or cfg.get("model")      or os.environ.get("ORPILOT_MODEL")
+    api_key    = api_key    or cfg.get("api_key")
+    base_url   = base_url   or cfg.get("base_url")
+    solver     = solver     or cfg.get("solver")     or os.environ.get("ORPILOT_DEFAULT_SOLVER", "pulp")
+    split      = split      or cfg.get("split",      "test")
+    difficulty = difficulty or cfg.get("difficulty")
+    limit      = limit      if limit      is not None else cfg.get("limit")
+    timeout    = timeout    if timeout    is not None else cfg.get("timeout", 180)
+    verbose     = verbose     if verbose     is not None else cfg.get("verbose",      False)
+    generate_ir = generate_ir if generate_ir is not None else cfg.get("generate_ir", False)
+    temperature = temperature if temperature is not None else cfg.get("temperature",  0.0)
+    if save_dir is None and "save_dir" in cfg:
+        save_dir = Path(cfg["save_dir"])
+
+    # Parse ids
+    parsed_ids: list[int] | None = None
+    if ids:
+        try:
+            parsed_ids = [int(x.strip()) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            console.print("[red]--ids must be a comma-separated list of integers[/red]")
+            raise typer.Exit(1)
+
+    console.print(f"[dim]Loading cases from {dataset} (split={split})...[/dim]")
+    try:
+        cases = load_hf_cases(dataset, split=split, difficulty=difficulty, ids=parsed_ids, limit=limit)
+    except ImportError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    if not cases:
+        console.print("[yellow]No cases matched the given filters.[/yellow]")
+        raise typer.Exit(0)
+
+    console.print(f"[dim]Loaded {len(cases)} case(s).[/dim]")
+
+    llm_config = LLMConfig(provider=provider, model=model, api_key=api_key, base_url=base_url, temperature=temperature)
+    llm = get_llm(llm_config)
+
+    if save_dir:
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+    runner = BenchmarkRunner(timeout=timeout)
+    passed = 0
+    failed = 0
+
+    for case in cases:
+        if case.tables is not None:
+            result = runner.run_direct_code_gen(case, case.tables, llm, solver=solver, generate_ir=generate_ir)
+        else:
+            result = runner.run_direct_pipeline(case, llm, solver=solver, generate_ir=generate_ir)
+
+        obj_str = f"{result.objective_value}" if result.objective_value is not None else "N/A"
+        exp_str = f"{case.expected_objective}" if case.expected_objective is not None else "N/A"
+        time_str = f"{result.solve_time:.1f}s" if result.solve_time is not None else "N/A"
+
+        if result.passed:
+            passed += 1
+            console.print(
+                f"[green bold]PASS[/green bold]  {case.name}  "
+                f"obj={obj_str}  expected={exp_str}  time={time_str}"
+            )
+        else:
+            failed += 1
+            console.print(
+                f"[red bold]FAIL[/red bold]  {case.name}  "
+                f"obj={obj_str}  expected={exp_str}  time={time_str}"
+            )
+            if result.error:
+                if verbose:
+                    console.print(Panel(result.error, title="[red]Error[/red]", border_style="red"))
+                else:
+                    console.print(f"  [red]Error: {result.error[:200]}[/red]")
+
+        if save_dir and result.ir_model:
+            import json as _json
+            ir_out = save_dir / f"{case.name}_ir.json"
+            ir_out.write_text(_json.dumps(result.ir_model, indent=2), encoding="utf-8")
+
+    total = passed + failed
+    pct = 100.0 * passed / total if total else 0.0
+    console.print(f"\n[bold]{passed}/{total} passed ({pct:.1f}%)[/bold]")
+
+    raise typer.Exit(0 if failed == 0 else 1)
 
 
 if __name__ == "__main__":

@@ -59,3 +59,6 @@ class WorkflowState(TypedDict, total=False):
 
     # Whether to stream the solver log to stdout
     show_solver_log: bool
+
+    # When True: generate IR on-demand after a successful solve (for solver portability)
+    generate_ir: bool

@@ -22,6 +22,8 @@ class LLMConfig:
     timeout: float = 120.0
     # How many times to retry after a timeout before giving up.
     max_retries: int = 2
+    # Sampling temperature: 0.0 = fully deterministic, 1.0 = default creative.
+    temperature: float = 0.0
     extra: dict = field(default_factory=dict)
 
 
@@ -52,6 +54,7 @@ def get_llm(config: LLMConfig | None = None) -> BaseLLM:
             max_tokens=config.max_tokens,
             timeout=config.timeout,
             max_retries=config.max_retries,
+            temperature=config.temperature,
         )
     elif provider == "anthropic":
         from .anthropic import AnthropicLLM
@@ -62,6 +65,7 @@ def get_llm(config: LLMConfig | None = None) -> BaseLLM:
             max_tokens=config.max_tokens,
             timeout=config.timeout,
             max_retries=config.max_retries,
+            temperature=config.temperature,
         )
     else:
         raise ValueError(f"Unknown LLM provider: {provider!r}. Supported: openai, anthropic")

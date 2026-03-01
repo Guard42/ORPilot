@@ -14,11 +14,12 @@ class AnthropicLLM(BaseLLM):
 
     def __init__(
         self,
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-sonnet-4-6",
         api_key: str | None = None,
         max_tokens: int = 4096,
         timeout: float = 120.0,
         max_retries: int = 2,
+        temperature: float = 0.0,
     ):
         import anthropic
 
@@ -29,6 +30,7 @@ class AnthropicLLM(BaseLLM):
         self._model = model
         self._max_tokens = max_tokens
         self._max_retries = max_retries
+        self._temperature = temperature
         self._timeout_exceptions = self._resolve_timeout_exc()
 
     @staticmethod
@@ -37,6 +39,7 @@ class AnthropicLLM(BaseLLM):
         return (anthropic.APITimeoutError, anthropic.APIConnectionError)
 
     def chat(self, messages: list[dict]) -> str:
+        messages = self._sanitize_messages(messages)
         system = None
         chat_messages = []
         for m in messages:
@@ -49,6 +52,7 @@ class AnthropicLLM(BaseLLM):
             "model": self._model,
             "max_tokens": self._max_tokens,
             "messages": chat_messages,
+            "temperature": self._temperature,
         }
         if system:
             kwargs["system"] = system
@@ -81,18 +85,11 @@ class AnthropicLLM(BaseLLM):
             response = self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
+                temperature=self._temperature,
                 system=system,
                 messages=chat_messages,
             )
             raw = response.content[0].text
-
-            # Extract JSON from possible markdown fencing
-            if "```" in raw:
-                start = raw.find("{")
-                end = raw.rfind("}") + 1
-                if start != -1 and end > start:
-                    raw = raw[start:end]
-
-            return schema.model_validate_json(raw)
+            return schema.model_validate_json(self._strip_json_fences(raw))
 
         return self._retry(_call, self._max_retries, self._timeout_exceptions)

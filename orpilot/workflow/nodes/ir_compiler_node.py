@@ -19,6 +19,9 @@ def ir_compiler_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
     ir_model = state.get("ir_model")
     solver = state.get("solver_name", "pulp")
 
+    if ir_model is None:
+        return {**state, "current_node": "ir_compiler"}
+
     try:
         code = IRCompiler().compile(ir_model, solver)
     except Exception:

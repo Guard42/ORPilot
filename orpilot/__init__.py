@@ -12,6 +12,8 @@ Usage::
 
 from __future__ import annotations
 
+__version__ = "0.1.0"
+
 from typing import Any
 
 from orpilot.llm.config import LLMConfig, get_llm
@@ -35,6 +37,8 @@ class Agent:
         max_retries: int = 3,
         data_dir: str = str(DATA_DIR),
         output_dir: str | None = None,
+        solver_time_limit: int | None = None,
+        show_solver_log: bool = False,
     ):
         self._llm_config = LLMConfig(
             provider=llm_provider,
@@ -47,6 +51,8 @@ class Agent:
         self._max_retries = max_retries
         self._data_dir = data_dir
         self._output_dir = output_dir
+        self._solver_time_limit = solver_time_limit
+        self._show_solver_log = show_solver_log
         self._graph = build_graph(llm=self._llm)
 
     def run(
@@ -100,6 +106,8 @@ class Agent:
             "data_dir": resolved_dir,
             "csv_specs": [],
             "output_dir": resolved_output,
+            "solver_time_limit": self._solver_time_limit,
+            "show_solver_log": self._show_solver_log,
         }
 
         # Pre-populate problem
