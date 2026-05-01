@@ -1146,6 +1146,9 @@ def compile_ir_cmd(
 
     solver = solver or cfg.get("solver") or os.environ.get("ORPILOT_DEFAULT_SOLVER", "pulp")
     show_solver_log = show_solver_log if show_solver_log is not None else cfg.get("show_solver_log", False)
+    if data_dir is None and "data_dir" in cfg:
+        cfg_dir = resolved_config.parent if resolved_config else Path.cwd()
+        data_dir = (cfg_dir / cfg["data_dir"]).resolve()
 
     # Load IR
     import json as _json
@@ -1175,7 +1178,7 @@ def compile_ir_cmd(
 
     if run:
         if data_dir is None:
-            console.print("[red]--run requires --data-dir.[/red]")
+            console.print("[red]--run requires --data-dir (or data_dir set in orpilot.toml).[/red]")
             raise typer.Exit(1)
 
         from orpilot.solver.registry import get_solver

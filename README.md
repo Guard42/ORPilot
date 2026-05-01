@@ -1,11 +1,14 @@
 # ORPilot — AI Operations Research Modeling Agent
 
-ORPilot is an open-source, LLM-powered agent that turns natural-language business problems into working optimization models — automatically handling data ingestion, model formulation, and code generation across multiple solver backends.
+ORPilot is an open-source AI agent that turns natural-language business problems into working optimization models — automatically handling data ingestion, model formulation, and code generation across multiple solver backends with LLMs from multiple providers.
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Gurobi · CPLEX · PuLP · Pyomo · OR-Tools](https://img.shields.io/badge/solvers-PuLP%20%7C%20Pyomo%20%7C%20OR--Tools%20%7C%20Gurobi%20%7C%20CPLEX-green.svg)]()
 [![OpenAI · Anthropic · Google · DeepSeek](https://img.shields.io/badge/LLMs-OpenAI%20%7C%20Anthropic%20%7C%20Google%20%7C%20DeepSeek-orange.svg)]()
+[![Paper](https://img.shields.io/badge/paper-working%20paper-blue.svg)](PAPER_URL)
+
+> 📄 [PAPER_TITLE](PAPER_URL) — Guangrui Xie, 2026
 
 ---
 
@@ -21,113 +24,33 @@ Most existing LLM-OR tools were created in a pure academic setting, where the pr
 
 **Fourth, reproducibility and portability matter for production.** ORPilot produces an **Intermediate Representation (IR)** — a compact JSON blob that captures all the information needed to reconstruct the OR model. Compiling from IR to solver code is fully deterministic. This means you can reproduce results, switch solver backends, or re-run the model on another machine without making any LLM calls.
 
-Finally, generated solver code is rarely perfect on the first attempt. ORPilot wraps code generation in a **self-correcting retry loop** that feeds solver errors, infeasibility signals, and tracebacks back to the LLM for targeted repairs.
+**Finally, generated solver code is rarely perfect on the first attempt.** ORPilot wraps code generation in a **self-correcting retry loop** that feeds solver errors, infeasibility signals, and tracebacks back to the LLM for targeted repairs.
 
 ### Interactive pipeline
-
-```
-  User (natural language)
-          │
-          ▼
-  ┌───────────────┐  ◄ LLM   need more info?
-  │   Interview   │ ──────────────────► wait for user ──► (resume)
-  └───────┬───────┘
-          │ problem understood
-          ▼
-  ┌──────────────────┐  ◄ LLM   data incomplete?
-  │  Data Collection │ ──────────────────► wait for user ──► (resume)
-  └────────┬─────────┘
-           │ tables extracted → CSVs
-           ▼
-  ┌────────────────────┐  ◄ LLM
-  │  Param Computation │  derives secondary params (distances, costs, ratios)
-  └────────┬───────────┘
-           │                    ┌─────────────────────────────────────┐
-           ▼                    │ retry with error feedback (≤N times)│
-  ┌────────────────┐  ◄ LLM     │                                     │
-  │    Code Gen    │◄───────────┘   writes solver code                │
-  │                │               (Gurobi / CPLEX /…)                │
-  └───────┬────────┘                                                  │
-          │                                                           │
-          ▼                                                           │
-  ┌────────────────┐   infeasible /                                   │
-  │  Solver Runner │   error /       ─────────────────────────────────┘
-  │                │   unbounded?
-  └───────┬────────┘
-          │ optimal / feasible
-          ▼
-  ┌────────────────┐  ◄ LLM
-  │    Reporter    │  plain-English summary of the solution
-  └────────────────┘
-```
-
+![Pipeline overview](assets/interactive_pipeline.png)
+Blue indicates a LLM-involved step and orange indicates a deterministic step.
 Sessions are automatically saved to `session.json` and can be resumed at any point — the agent picks up exactly where it left off.
 
-### Benchmark mode
+### IR compiler pipeline
+![Pipeline overview](assets/ir_compiler_pipeline.png)
+Blue indicates a LLM-involved step and orange indicates a deterministic step.
 
-Benchmark mode skips the conversational interview and runs directly from a structured problem description.
-
-```
-  ┌──────────────────────────────────────────────────────────────────┐
-  │  Direct pipeline  (primary — 2+ LLM calls)                       │
-  │                                                                  │
-  │   problem_text (natural language)                                │
-  │         │                                                        │
-  │         ▼                                                        │
-  │   ┌──────────┐  ◄ LLM                                            │
-  │   │ Ingestor │  extracts structured tables from text             │
-  │   └────┬─────┘                                                   │
-  │        │ tables                 ┌────────────────────────────┐   │
-  │        ▼                        │  retry with error feedback │   │
-  │   ┌──────────────────┐          │          (≤N times)        │   │
-  │   │ Param Computation│  ◄ LLM   │                            │   │
-  │   └────────┬─────────┘          │                            │   │
-  │            ▼          ◄─────────┘                            │   │
-  │   ┌────────────────┐  ◄ LLM                                  │   │
-  │   │    Code Gen    │  writes solver code directly            │   │
-  │   └───────┬────────┘                                         │   │
-  │           ▼                                                  │   │
-  │   ┌───────────────┐  infeasible / error / unbounded?         │   │
-  │   │ Solver Runner │──────────────────────────────────────────┘   │
-  │   └───────┬───────┘                                              │
-  │           │ optimal                                              │
-  │           ▼                                                      │
-  │        Result                                                    │
-  └──────────────────────────────────────────────────────────────────┘
-
-  ┌──────────────────────────────────────────────────────────────────┐
-  │  Compiler only  (0 LLM calls, fully deterministic)               │
-  │                                                                  │
-  │   ir.json + data/CSVs                                            │
-  │         │                                                        │
-  │         ▼                                                        │
-  │   ┌─────────────┐                                                │
-  │   │ IR Compiler │  JSON → solver code                            │
-  │   └──────┬──────┘                                                │
-  │          ▼                                                       │
-  │   ┌───────────────┐                                              │
-  │   │ Solver Runner │──► Result                                    │
-  │   └───────────────┘                                              │
-  └──────────────────────────────────────────────────────────────────┘
-```
-
-| Mode | Artifacts needed | LLM calls | Use case |
-|------|-----------------|:---------:|---------|
-| Direct pipeline | none | 2+ | End-to-end from raw problem text |
-| Compiler only | `ir.json` + `data/` | 0 | Reproduce or port results without API cost |
+### Solve from text pipeline
+![Pipeline overview](assets/solve_from_text_pipeline.png)
+Blue indicates a LLM-involved step and orange indicates a deterministic step.
 
 ### Key differentiators
 
-| Feature | ORPilot | Typical LLM+OR tools |
-|---|:---:|:---:|
-| Conversational problem intake | ✅ | rare |
-| Automatic data extraction to CSV | ✅ | rare |
-| Parameter computation from raw data | ✅ | rare |
-| Multi-solver backend (PuLP / Pyomo / OR-Tools / Gurobi / CPLEX) | ✅ | ❌ |
-| Bring your own LLM (OpenAI / Anthropic / Google / DeepSeek / any OpenAI-compatible API) | ✅ | ❌ |
-| Structured IR for reproducibility and portability | ✅ | ❌ |
-| Self-correcting retry loop with error feedback | ✅ | ✅ |
-| Session save and resume | ✅ | ❌ |
+| Feature | ORPilot | 
+|---|:---:|
+| Conversational problem intake | ✅ |
+| Automatic data extraction to CSV | ✅ | 
+| Parameter computation from raw data | ✅ | 
+| Multi-solver backend (PuLP / Pyomo / OR-Tools / Gurobi / CPLEX) | ✅ | 
+| Bring your own LLM (OpenAI / Anthropic / Google / DeepSeek / any OpenAI-compatible API) | ✅ |
+| Structured IR for reproducibility and portability | ✅ | 
+| Self-correcting retry loop with error feedback | ✅ | 
+| Session save and resume | ✅ |
 
 ---
 
@@ -148,12 +71,12 @@ export OPENAI_API_KEY=sk-...       # OpenAI
 # export OPENAI_API_KEY=sk-...     # DeepSeek — uses the OpenAI-compatible SDK, so set OPENAI_API_KEY to your DeepSeek key and configure base_url in orpilot.toml (see below)
 ```
 
-It is recommended to manage your configurations in `orpilot.toml`. ORPilot picks up the configurations here automatically.
+It is recommended to manage your configurations in `orpilot.toml`. ORPilot picks up the configurations here automatically. CLI flags take precedence over values set here.
 
 ```toml
 provider        = "openai"        # openai | anthropic | google
-model           = "gpt-4o"        # any model your provider supports
-solver          = "pulp"          # pulp | pyomo | ortools | gurobi | cplex
+model           = "gpt-5-mini"    # any model your provider supports
+solver          = "gurobi"        # gurobi | cplex | pulp | pyomo | ortools
 time_limit      = 300             # solver time limit (seconds)
 max_retries     = 3               # max code-generation retry attempts
 show_solver_log = false           # stream solver output to stdout
@@ -171,26 +94,29 @@ api_key         = "sk-..."        # or set OPENAI_API_KEY / ANTHROPIC_API_KEY / 
 # model    = "deepseek-reasoner"
 
 generate_ir = false   # generate ir.json after each successful solve (for portability)
-save_data   = false   # save data.json to output_dir (lets you run model.py on another machine)
+save_data   = false   # save data.json to output_dir, which contains the data extracted from the CSVs and is directly comsumed by generated solver code
 ```
 
-### CLI
+CLI commands:
 
 ```bash
+# ORPilot picks up the configurations from orpilot.toml automatically. CLI flags take precedence over values set there.
+
 # Interactive session — ORPilot interviews you about your problem. Parameters auto-loaded from orpilot.toml file.
 orpilot run
 
 # Solve a problem described in a plain-text file (non-interactive)
-orpilot solve problem.txt --solver gurobi --output-dir output/
+orpilot solve path/to/your/problem.txt 
 
-# Generate an IR from an existing completed output folder, make sure the model.py file and the session.json file are in the output folder and the csv data files are in the directory specified by the "data_dir" field in the session.json file
-orpilot generate-ir output/
+# Generate an IR from an existing completed output folder (requires model.py and session.json
+# in the output folder, and CSVs at the path recorded in session.json's "data_dir" field)
+orpilot generate-ir path/to/completed/output/
 
-# Compile an IR into solver code (no LLM, fully deterministic)
-orpilot compile-ir output/ir.json --solver gurobi
+# Compile an IR into solver code only (no LLM, fully deterministic)
+orpilot compile-ir output/ir.json 
 
-# Compile and immediately run the model
-orpilot compile-ir output/ir.json --data-dir data/ --run
+# Compile and immediately run the optimization model, make sure the CSVs needed for this optimization model are in the directory specified by the "data_dir" field in orpilot.toml
+orpilot compile-ir output/ir.json --run
 ```
 
 ---
@@ -198,24 +124,18 @@ orpilot compile-ir output/ir.json --data-dir data/ --run
 ## Installation
 
 ```bash
-# Core + all open-source solvers (PuLP, Pyomo, OR-Tools)
+# Core + all solvers (Gurobi, CPLEX, PuLP, Pyomo, OR-Tools)
 pip install -e ".[all-solvers]"
 
-# Core only (uses PuLP by default)
-pip install -e ".[pulp]"
-
-# Individual solver extras
-pip install -e ".[pyomo]"
-pip install -e ".[ortools]"
-pip install -e ".[gurobi]"
-pip install -e ".[cplex]"
-
-# Google Gemini support
-pip install -e ".[gemini]"
-
-# HuggingFace dataset support (for benchmark runs)
-pip install -e ".[hf]"
+# Individual solver installation
+pip install -e ".[<solver_name>]"  # for example, pip install -e ".[gurobi]"
 ```
+Gurobi requires a license. Academic licenses are free at [gurobi.com/academia](https://www.gurobi.com/academia/academic-program-and-licenses/). Once obtained, activate it with:
+
+```bash
+grbgetkey YOUR-LICENSE-KEY
+```
+CPLEX requires a license. Academic licenses are available through the [IBM Academic Initiative](https://www.ibm.com/academic/topic/data-science). Once installed, CPLEX is picked up automatically via the `CPLEX_STUDIO_DIR` environment variable set by the installer — no additional activation step is needed.
 
 Requirements: Python 3.10+
 
@@ -223,16 +143,18 @@ Requirements: Python 3.10+
 
 ## Demo: Supply Chain Network Design
 
+This demo problem is a much smaller-scaled version of the test problem in Section 4.2 of this paper: 
+
 This walkthrough shows ORPilot solving a real-world **Mixed-Integer Program** end to end — from a plain-English conversation to an optimal production and distribution plan.
 
-### The problem
-
-> *"I run a supply chain with multiple production sites, distribution centers, and customers. I want to decide which facilities to open and when, how much to produce at each site, and how to route products to customers — maximizing total profit over a planning horizon."*
+The user aims to optimize a supply chain network with multiple production sites, distribution centers, and customers. The user wants to decide which facilities to open and when, how much to produce at each site, and how to route products to customers — maximizing total profit over a planning horizon.
 
 ORPilot's interview agent asks clarifying questions to fill in the details: cost structure, capacity types, demand patterns, inventory mechanics, and facility opening logic. Once the problem is fully specified, the data collection agent defines exactly which CSV tables are needed and validates them before solving.
 
 
-**Interview (excerpt):** 
+**Interview - user conversation (excerpt):** 
+
+Here is an excerpt of the conversation history between the interview agent and the user.
 
 ```
 # For a full conversation trajectory between the interview agent and user, check demo/output/session.json
@@ -266,7 +188,9 @@ User     Once a production site or distribution center is opened in a period, it
 ORPilot  Perfect, I have everything needed. Proceeding to data collection.
 ```
 
-**Data collection — CSV schema specification (excerpt):**
+**Data collection — user conversation (excerpt):**
+
+Here is an excerpt of the conversation history between the data collection agent and the user.
 
 ```
 # For a full conversation trajectory between the interview agent and user, check demo/output/session.json
@@ -296,30 +220,7 @@ ORPilot  Here is the specification of required CSV data files:
 
 User     ready
 ```
-
-**Model structure:**
-
-| Element | Description |
-|---|---|
-| **Sets** | 5 production sites · 5 distribution centers · 3 customers · 3 products · 3 periods |
-| **Binary decisions** | Open/close each site and DC per period (monotonic: once open, stays open) |
-| **Continuous decisions** | Production quantities · shipment flows (site→DC, DC→customer) · end-of-period inventory |
-| **Objective** | Maximize profit = revenue − production − transport − holding − fixed opening − operating costs |
-| **Constraints** | Production capacity · throughput capacity · storage capacity · demand fulfillment · inventory balance · big-M facility logic |
-
-The transportation network is **sparse**: not every site can ship to every DC, and not every DC serves every customer. The valid routes are defined by the rows of the transport cost tables.
-
-```
-Production Sites          Distribution Centers        Customers
-─────────────             ────────────────────        ─────────
-PS_013 ──────────────────► DC_002 ──────────────────► C_0105
-PS_013, PS_039, …  ──────► DC_006 ──────────────────► C_0006
-PS_042, PS_044, …  ──────► DC_005 ──────────────────► C_0019
-PS_047             ──────► DC_041, DC_044
-                           (sparse links only)
-```
-
-### Input data (16 CSV files) specified by the data collection agent
+Here is a full list of the CSV files the data collection agent specifies:
 
 ```
 demo/data/
@@ -341,52 +242,35 @@ demo/data/
   revenue.csv                   ← unit revenue per product
 ```
 
-### Running the demo
+**Model structure:**
 
-```bash
-# Copy demo data into the working data directory, run from root folder of ORPilot
-cp -r demo/data/ data/
+A closer look at the model structure 
 
-# Due to the non-determinstic nature of LLMs, the LLM-user conversation trajectory and required CSVs
-# can be different if run from scratch. To ensure the same conversation trajectory and required CSVs,
-# resume from the saved session.json in demo/output folder. Data will be read from ORPilot/data/ folder, and 
-# results will be stored in ORPilot/output/ folder.
-orpilot run --session demo/output/session.json --data-dir data/ --output-dir output/
+| Element | Description |
+|---|---|
+| **Sets** | 5 production sites · 5 distribution centers · 3 customers · 3 products · 3 periods |
+| **Binary decisions** | Open/close each site and DC per period (monotonic: once open, stays open) |
+| **Continuous decisions** | Production quantities · shipment flows (site→DC, DC→customer) · end-of-period inventory |
+| **Objective** | Maximize profit = revenue − production − transport − holding − fixed opening − operating costs |
+| **Constraints** | Production capacity · throughput capacity · storage capacity · demand fulfillment · inventory balance · big-M facility opening logic |
+
+The transportation network is **sparse**: not every site can ship to every DC, and not every DC serves every customer. The valid routes are defined by the rows of the transport cost tables.
+
+```
+Production Sites          Distribution Centers        Customers
+─────────────             ────────────────────        ─────────
+PS_013 ──────────────────► DC_002 ──────────────────► C_0105
+PS_013, PS_039, …  ──────► DC_006 ──────────────────► C_0006
+PS_042, PS_044, …  ──────► DC_005 ──────────────────► C_0019
+PS_047             ──────► DC_041, DC_044
+                           (sparse links only)
 ```
 
+**Solution report (excerpt):**
+
+Here is an example solution report given by ORPilot for this demo problem. 
+
 ```
-$ orpilot run --session demo/output/session.json --data-dir data/ --output-dir output/
-Loaded config from orpilot.toml
-
-╭─────────────────────────────────── Problem ────────────────────────────────────╮
-│ Loaded problem: Multi-Period Supply Chain Network Design                       │
-╰────────────────────────────────────────────────────────────────────────────────╯
-
->> Computing derived parameters...
-  -> Saved data.json to output/data.json
-
->> Generating solver code...
-✓ Solver code generated.
-  -> Saved generated code to output/model.py
-
->> Starting model solving...
-  -> Saved LP file to output/model.lp
-✓ Model solving finished.
-  -> Saved optimization summary to output/optimization_summary.txt
-  -> Saved prod solution values to output/solution_prod.csv
-  -> Saved flow_prod_to_dc solution values to output/solution_flow_prod_to_dc.csv
-  -> Saved flow_dc_to_cust solution values to output/solution_flow_dc_to_cust.csv
-  -> Saved inv_site solution values to output/solution_inv_site.csv
-  -> Saved inv_dc solution values to output/solution_inv_dc.csv
-  -> Saved open_site solution values to output/solution_open_site.csv
-  -> Saved open_dc solution values to output/solution_open_dc.csv
-
->> Generating solution report...
-  -> Saved metrics to demo/output/metrics.json
-```
-
-**Solution report (generated by ORPilot):**
-
 **Status:** Optimal | **Objective:** −$1,419,138 | **Solve time:** 0.07s
 
 **Facility decisions**
@@ -410,62 +294,21 @@ Three distribution centres were opened:
 | DC_044 | C_0006   | P_135   | 10       | 12       | 11       |
 | DC_044 | C_0006   | P_277   | 23       | 19       | 25       |
 
-### What ORPilot produces
-
-After solving, `output/` contains:
-
-```
-model.py                  ← generated Gurobi solver code
-model.lp                  ← LP file written before solving (for inspection/debugging)
-solution_prod.csv         ← production quantities by site × product × period
-solution_flow_prod_to_dc.csv  ← shipment volumes, site → DC
-solution_flow_dc_to_cust.csv  ← shipment volumes, DC → customer
-solution_inv_site.csv     ← end-of-period inventory at each site
-solution_inv_dc.csv       ← end-of-period inventory at each DC
-solution_open_site.csv    ← which sites are open each period
-solution_open_dc.csv      ← which DCs are open each period
-optimization_summary.txt  ← status, objective value, solve time
-metrics.json              ← per-node token usage, latency, retry counts
-session.json              ← resumable conversation state
 ```
 
-The plain-English report (printed at the end of the run) explains which facilities were opened, the total cost breakdown, and any trade-offs the solver made.
+### Running the demo
 
-**`solution_open_site.csv`** — 1 = open, 0 = closed:
+Run the demo yourself following the steps below to replicate the results. 
 
-```
-site_id,period_id,value
-PS_042,1,1.0
-PS_042,2,1.0
-PS_042,3,1.0
-PS_044,1,1.0
-PS_044,2,1.0
-PS_044,3,1.0
-# PS_013, PS_039, PS_047 — all periods 0.0 (closed)
-```
+```bash
+# Copy demo data into the working data directory, run from root folder of ORPilot
+cp -r demo/data/ data/
 
-**`solution_flow_dc_to_cust.csv`** — non-zero shipment volumes only:
-
-```
-dc_id,customer_id,product_id,period_id,value
-DC_002,C_0105,P_317,1,38.0
-DC_002,C_0105,P_317,2,34.0
-DC_002,C_0105,P_317,3,43.0
-DC_005,C_0019,P_135,1,51.0
-DC_005,C_0019,P_135,2,68.0
-DC_005,C_0019,P_135,3,79.0
-DC_005,C_0019,P_277,1,32.0
-DC_005,C_0019,P_277,2,27.0
-DC_005,C_0019,P_277,3,27.0
-DC_005,C_0019,P_317,1,8.0
-DC_005,C_0019,P_317,2,8.0
-DC_005,C_0019,P_317,3,9.0
-DC_044,C_0006,P_135,1,10.0
-DC_044,C_0006,P_135,2,12.0
-DC_044,C_0006,P_135,3,11.0
-DC_044,C_0006,P_277,1,23.0
-DC_044,C_0006,P_277,2,19.0
-DC_044,C_0006,P_277,3,25.0
+# Due to the non-determinstic nature of LLMs, the LLM-user conversation trajectory and required CSVs
+# can be different if run from scratch. To ensure the same conversation trajectory and required CSVs,
+# resume from the saved session.json in demo/output folder. Data will be read from ORPilot/data/ folder, and 
+# results will be stored in ORPilot/output/ folder.
+orpilot run --session demo/output/session.json --data-dir data/ --output-dir output/
 ```
 
 > **Note:** `demo/output/session.json` contains a `data_dir` field indicating the path to the folder that stores the data. Before running, update that field to the absolute path of your local `data/` directory, e.g.:
@@ -473,12 +316,17 @@ DC_044,C_0006,P_277,3,25.0
 > "data_dir": "/absolute/path/to/your/ORPilot/data"
 > ```
 
-### Running the 
-Or non-interactively from a problem description file:
+---
+
+## Running the solve from text examples
+
+There are 5 toy example problems in `examples` to test the solve from text pipeline. Each example problem has a text file describing the optimization problem to be solved with in-line data. The problem description and data are ingested into ORPilot for modeling and solving. 
 
 ```bash
-orpilot solve supply_chain_problem.txt --solver gurobi \
-    --data-dir demo/data/ --output-dir demo/output/
+# test the example with ir generation
+orpilot solve examples/job_assignment/problem.txt --output-dir output/job_assignment --generate-ir
+# test the correctness of the generated ir by compiling from ir to see if it produces the same result
+orpilot compile-ir output/job_assignment/ir.json --data-dir output/job_assignment/data/ --out output/job_assignment/ir_test/model.py --run
 ```
 ---
 
@@ -517,7 +365,6 @@ orpilot solve problem.txt \
   --provider anthropic \
   --model claude-sonnet-4-6 \
   --solver gurobi \
-  --mode direct \                    # direct | ir
   --output-dir output/ \
   --max-retries 3 \
   --time-limit 300 \
@@ -548,7 +395,7 @@ Reads `session.json` and `model.py` from the output folder and produces `ir.json
 orpilot compile-ir output/ir.json \
   --out output/model.py \            # default: model.py next to ir.json
   --solver gurobi \
-  --data-dir data/ \                 # required with --run
+  --data-dir data/ \                 # directory storing the CSVs 
   --run \                            # solve + save CSVs + generate report after compiling
   --solver-log / --no-solver-log \
   --provider anthropic \             # for the reporter (only with --run)
@@ -560,30 +407,6 @@ orpilot compile-ir output/ir.json \
 ```
 
 Pass a directory instead of a file path and `compile-ir` will look for `ir.json` inside it.
-
----
-
-## Supported Models & Solvers
-
-**LLM Providers:**
-
-| Provider | Example models | Notes |
-|---|---|---|
-| OpenAI | `gpt-4o`, `o3-mini`, `o1` | set `provider = "openai"` |
-| Anthropic | `claude-sonnet-4-6`, `claude-opus-4-7` | set `provider = "anthropic"` |
-| Google | `gemini-2.0-flash`, `gemini-2.5-pro` | set `provider = "google"`, use `GOOGLE_API_KEY` |
-| DeepSeek | `deepseek-reasoner` (R1), `deepseek-chat` (V3) | set `base_url = "https://api.deepseek.com"` |
-| Any OpenAI-compatible | any | set `base_url` to your endpoint |
-
-**Solver Backends:**
-
-| Solver | Type | Notes |
-|---|---|---|
-| [PuLP](https://github.com/coin-or/pulp) | LP/MIP | Default — zero extra setup, CBC bundled |
-| [Pyomo](https://www.pyomo.org/) | LP/MIP/NLP | Flexible, supports many external solvers |
-| [OR-Tools](https://developers.google.com/optimization) | CP/MIP | Google's combinatorial solver |
-| [Gurobi](https://www.gurobi.com/) | LP/MIP | Requires a Gurobi license |
-| [CPLEX](https://www.ibm.com/products/ilog-cplex-optimization-studio) | LP/MIP | Requires a CPLEX license |
 
 ---
 
@@ -641,44 +464,44 @@ The IR compiler is fully deterministic: given the same `ir.json` and CSV data, i
 **[IndustryOR](https://huggingface.co/datasets/CardinalOperations/IndustryOR)** — Industrial benchmark. 100 real-world industrial OR problems spanning supply chain, scheduling, routing, and resource allocation:
 
 *Tested with Claude Sonnet 4.6*
-| Difficulty | Passed | Total | Accuracy | Average Time |
-|:---:|:---:|:---:|:---:|:---:|
-| Easy | 31 | 39 | **79.5%** | 23.4s |
-| Medium | 24 | 41 | **58.5%** | 32.2s |
-| Hard | 20 | 20 | **100.0%** | 43.3s |
-| **Overall** | **75** | **100** | **75.0%** | |
+| Difficulty | Passed | Total | Accuracy | 
+|:---:|:---:|:---:|:---:|
+| Easy | 31 | 39 | **79.5%** | 
+| Medium | 24 | 41 | **58.5%** | 
+| Hard | 20 | 20 | **100.0%** | 
+| **Overall** | **75** | **100** | **75.0%** |
 
 *Tested with DeepSeek-R1*
-| Difficulty | Passed | Total | Accuracy | Average Time |
-|:---:|:---:|:---:|:---:|:---:|
-| Easy | 32 | 39 | **82.1%** | 370.4s |
-| Medium | 25 | 41 | **61.0%** | 468.8s |
-| Hard | 17 | 20 | **85.0%** | 425.9s |
-| **Overall** | **74** | **100** | **74.0%** | |
+| Difficulty | Passed | Total | Accuracy | 
+|:---:|:---:|:---:|:---:|
+| Easy | 32 | 39 | **82.1%** | 
+| Medium | 25 | 41 | **61.0%** | 
+| Hard | 17 | 20 | **85.0%** | 
+| **Overall** | **74** | **100** | **74.0%** |
 
-*Tested with GPT-4o*
-| Difficulty | Passed | Total | Accuracy | Average Time |
-|:---:|:---:|:---:|:---:|:---:|
-| Easy | 23 | 39 | **59.0%** | 12.7s |
-| Medium | 14 | 41 | **34.1%** | 17.1s |
-| Hard | 9 | 20 | **45.0%** | 21.0s |
-| **Overall** | **46** | **100** | **46.0%** | ← Better than OptiMUS-0.3 (37%) reported in [arxiv:2407.19633](https://arxiv.org/abs/2407.19633) |
+*Tested with GPT-4o* 
+| Difficulty | Passed | Total | Accuracy | 
+|:---:|:---:|:---:|:---:|
+| Easy | 23 | 39 | **59.0%** | 
+| Medium | 14 | 41 | **34.1%** | 
+| Hard | 9 | 20 | **45.0%** | 
+| **Overall** | **46** | **100** | **46.0%** | ← Better than OptiMUS-0.3 (37%) reported in [arxiv:2407.19633](https://arxiv.org/abs/2407.19633) 
 
 **[NL4OPT](https://huggingface.co/datasets/CardinalOperations/NL4OPT)** — Academic LP benchmark with 231 problems with known optimal solutions:
 
-| LLM | Accuracy | Average Time |
-|:---:|:---:|:---:|
-| Claude Sonnet 4.6 | **73.2%** | 16.3s |
-| DeepSeek-R1 | **76.6%** | 235.1s |
-| GPT-4o | **71.0%** | 15.3s |
+| LLM | Accuracy |
+|:---:|:---:|
+| Claude Sonnet 4.6 | **73.2%** |
+| DeepSeek-R1 | **76.6%** |
+| GPT-4o | **71.0%** | 
 
 **[NLP4LP](https://huggingface.co/datasets/udell-lab/NLP4LP)** — Natural-language OR benchmark requiring end-to-end problem formulation and solving:
 
-| LLM | Accuracy | Average Time |
-|:---:|:---:|:---:|
-| Claude Sonnet 4.6 | **79.8%** | 14.8s |
-| DeepSeek-R1 | **76.7%** | 216.3s |
-| GPT-4o | **69.8%** | 16.1s |
+| LLM | Accuracy | 
+|:---:|:---:|
+| Claude Sonnet 4.6 | **79.8%** |
+| DeepSeek-R1 | **76.7%** | 
+| GPT-4o | **69.8%** | 
 
 ---
 
@@ -686,7 +509,7 @@ The IR compiler is fully deterministic: given the same `ir.json` and CSV data, i
 
 ```bash
 
-# Full pipeline against IndustryOR (requires API key)
+# IndustryOR benchmark
 pytest tests/benchmark/test_industryOR.py -m industryOR -v
 
 # Filter by difficulty or cap the number of cases
