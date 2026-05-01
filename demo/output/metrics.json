@@ -1,0 +1,66 @@
+{
+  "run_id": "2026-04-28T08:10:02",
+  "solver": "gurobi",
+  "nodes": {
+    "interview": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "latency_s": 0.0,
+      "retries": 0
+    },
+    "data_collection": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "latency_s": 0.0,
+      "retries": 0
+    },
+    "param_computation": {
+      "input_tokens": 2973,
+      "output_tokens": 477,
+      "latency_s": 7.76,
+      "retries": 0
+    },
+    "direct_code_gen": {
+      "input_tokens": 14167,
+      "output_tokens": 7691,
+      "latency_s": 97.37,
+      "retries": 0
+    },
+    "solver_runner": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "latency_s": 0.07,
+      "retries": 0
+    },
+    "reporter": {
+      "input_tokens": 3301,
+      "output_tokens": 1533,
+      "latency_s": 19.63,
+      "retries": 0
+    }
+  },
+  "totals": {
+    "input_tokens": 20441,
+    "output_tokens": 9701,
+    "latency_s": 124.83,
+    "retries": 0
+  },
+  "solution_status": "optimal",
+  "objective_value": -1419138.19,
+  "prompt_versions": {
+    "data_guide_spec_extraction.md": "1.0.0",
+    "data_guide_system.md": "1.0.0",
+    "direct_code_gen_cplex.md": "1.0.0",
+    "direct_code_gen_gurobi.md": "1.0.0",
+    "direct_code_gen_ortools.md": "1.0.0",
+    "direct_code_gen_pulp.md": "1.0.0",
+    "direct_code_gen_pyomo.md": "1.0.0",
+    "ingestor_system.md": "1.0.0",
+    "interview_summarize.md": "1.0.0",
+    "interview_system.md": "1.0.0",
+    "ir_system.md": "1.0.0",
+    "param_computation_system.md": "1.0.0",
+    "param_computation_user.md": "1.0.0",
+    "report_system.md": "1.0.0"
+  }
+}

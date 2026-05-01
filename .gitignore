@@ -20,9 +20,9 @@ build/
 # Claude Code local settings
 .claude/
 
-# Runtime output artifacts
-output/
-data/
+# Runtime output artifacts (root-level only; demo/data/ and demo/output/ are tracked)
+/output/
+/data/
 
 # Solver-generated files (PuLP/Pyomo may write these to working dir)
 *.lp

@@ -1,0 +1,1302 @@
+{
+  "problem_class": "SupplyChainNetworkDesign",
+  "model_type": "Mixed Integer Program",
+  "sense": "maximize",
+  "sets": {
+    "ProductionSites": {
+      "size": null,
+      "index_symbol": "i",
+      "source": "sets.csv",
+      "column": "element",
+      "filter_column": "set_name",
+      "filter_value": "production_sites",
+      "ordered": false
+    },
+    "DistributionCenters": {
+      "size": null,
+      "index_symbol": "j",
+      "source": "sets.csv",
+      "column": "element",
+      "filter_column": "set_name",
+      "filter_value": "distribution_centers",
+      "ordered": false
+    },
+    "Customers": {
+      "size": null,
+      "index_symbol": "k",
+      "source": "sets.csv",
+      "column": "element",
+      "filter_column": "set_name",
+      "filter_value": "customers",
+      "ordered": false
+    },
+    "Products": {
+      "size": null,
+      "index_symbol": "p",
+      "source": "sets.csv",
+      "column": "element",
+      "filter_column": "set_name",
+      "filter_value": "products",
+      "ordered": false
+    },
+    "Periods": {
+      "size": null,
+      "index_symbol": "t",
+      "source": "sets.csv",
+      "column": "element",
+      "filter_column": "set_name",
+      "filter_value": "periods",
+      "ordered": true
+    }
+  },
+  "parameters": {
+    "demand": {
+      "domain": [
+        "Customers",
+        "Products",
+        "Periods"
+      ],
+      "type": "float",
+      "source": "demand.csv",
+      "column": "demand",
+      "index_columns": [
+        "customer_id",
+        "product_id",
+        "period_id"
+      ],
+      "missing_default": "zero"
+    },
+    "production_capacity": {
+      "domain": [
+        "ProductionSites",
+        "Periods"
+      ],
+      "type": "float",
+      "source": "production_capacity.csv",
+      "column": "capacity",
+      "index_columns": [
+        "site_id",
+        "period_id"
+      ],
+      "missing_default": "inf"
+    },
+    "throughput_capacity": {
+      "domain": [
+        "DistributionCenters",
+        "Periods"
+      ],
+      "type": "float",
+      "source": "throughput_capacity.csv",
+      "column": "capacity",
+      "index_columns": [
+        "dc_id",
+        "period_id"
+      ],
+      "missing_default": "inf"
+    },
+    "storage_capacity_site": {
+      "domain": [
+        "ProductionSites"
+      ],
+      "type": "float",
+      "source": "storage_capacity_sites.csv",
+      "column": "capacity",
+      "index_columns": [
+        "site_id"
+      ],
+      "missing_default": "inf"
+    },
+    "storage_capacity_dc": {
+      "domain": [
+        "DistributionCenters"
+      ],
+      "type": "float",
+      "source": "storage_capacity_dcs.csv",
+      "column": "capacity",
+      "index_columns": [
+        "dc_id"
+      ],
+      "missing_default": "inf"
+    },
+    "production_cost": {
+      "domain": [
+        "ProductionSites",
+        "Products"
+      ],
+      "type": "float",
+      "source": "production_cost.csv",
+      "column": "unit_cost",
+      "index_columns": [
+        "site_id",
+        "product_id"
+      ],
+      "missing_default": "inf"
+    },
+    "transport_cost_prod_to_dc": {
+      "domain": [
+        "ProductionSites",
+        "DistributionCenters"
+      ],
+      "type": "float",
+      "source": "transport_cost_prod_to_dc.csv",
+      "column": "unit_cost",
+      "index_columns": [
+        "site_id",
+        "dc_id"
+      ],
+      "missing_default": "inf"
+    },
+    "transport_cost_dc_to_cust": {
+      "domain": [
+        "DistributionCenters",
+        "Customers"
+      ],
+      "type": "float",
+      "source": "transport_cost_dc_to_cust.csv",
+      "column": "unit_cost",
+      "index_columns": [
+        "dc_id",
+        "customer_id"
+      ],
+      "missing_default": "inf"
+    },
+    "holding_cost_site": {
+      "domain": [
+        "ProductionSites",
+        "Products"
+      ],
+      "type": "float",
+      "source": "holding_cost_sites.csv",
+      "column": "unit_cost",
+      "index_columns": [
+        "site_id",
+        "product_id"
+      ],
+      "missing_default": "inf"
+    },
+    "holding_cost_dc": {
+      "domain": [
+        "DistributionCenters",
+        "Products"
+      ],
+      "type": "float",
+      "source": "holding_cost_dcs.csv",
+      "column": "unit_cost",
+      "index_columns": [
+        "dc_id",
+        "product_id"
+      ],
+      "missing_default": "inf"
+    },
+    "fixed_cost_open_site": {
+      "domain": [
+        "ProductionSites"
+      ],
+      "type": "float",
+      "source": "fixed_cost_open_sites.csv",
+      "column": "cost",
+      "index_columns": [
+        "site_id"
+      ],
+      "missing_default": "inf"
+    },
+    "fixed_cost_open_dc": {
+      "domain": [
+        "DistributionCenters"
+      ],
+      "type": "float",
+      "source": "fixed_cost_open_dcs.csv",
+      "column": "cost",
+      "index_columns": [
+        "dc_id"
+      ],
+      "missing_default": "inf"
+    },
+    "operating_cost_site": {
+      "domain": [
+        "ProductionSites"
+      ],
+      "type": "float",
+      "source": "operating_cost_sites.csv",
+      "column": "cost",
+      "index_columns": [
+        "site_id"
+      ],
+      "missing_default": "inf"
+    },
+    "operating_cost_dc": {
+      "domain": [
+        "DistributionCenters"
+      ],
+      "type": "float",
+      "source": "operating_cost_dcs.csv",
+      "column": "cost",
+      "index_columns": [
+        "dc_id"
+      ],
+      "missing_default": "inf"
+    },
+    "revenue": {
+      "domain": [
+        "Products"
+      ],
+      "type": "float",
+      "source": "revenue.csv",
+      "column": "unit_revenue",
+      "index_columns": [
+        "product_id"
+      ],
+      "missing_default": "zero"
+    },
+    "bigM": {
+      "domain": [],
+      "type": "float",
+      "source": "bigM.csv",
+      "column": "bigM",
+      "index_columns": null
+    },
+    "initial_inventory_site": {
+      "domain": [
+        "ProductionSites",
+        "Products"
+      ],
+      "type": "float",
+      "source": "initial_inventory_sites.csv",
+      "column": "quantity",
+      "index_columns": [
+        "site_id",
+        "product_id"
+      ],
+      "missing_default": "zero",
+      "optional": true
+    },
+    "initial_inventory_dc": {
+      "domain": [
+        "DistributionCenters",
+        "Products"
+      ],
+      "type": "float",
+      "source": "initial_inventory_dcs.csv",
+      "column": "quantity",
+      "index_columns": [
+        "dc_id",
+        "product_id"
+      ],
+      "missing_default": "zero",
+      "optional": true
+    }
+  },
+  "variables": {
+    "prod": {
+      "description": "Quantity of product p produced at production site i in period t",
+      "label": "production_quantities",
+      "domain": [
+        "ProductionSites",
+        "Products",
+        "Periods"
+      ],
+      "type": "continuous",
+      "lower_bound": 0,
+      "upper_bound": null,
+      "upper_bound_set": null,
+      "exclude_diagonal": false
+    },
+    "flow_prod_to_dc": {
+      "description": "Quantity of product p shipped from production site i to distribution center j in period t",
+      "label": "site_to_dc_shipments",
+      "domain": [
+        "ProductionSites",
+        "DistributionCenters",
+        "Products",
+        "Periods"
+      ],
+      "type": "continuous",
+      "lower_bound": 0,
+      "upper_bound": null,
+      "upper_bound_set": null,
+      "exclude_diagonal": false,
+      "domain_filter": "transport_cost_prod_to_dc"
+    },
+    "flow_dc_to_cust": {
+      "description": "Quantity of product p shipped from distribution center j to customer k in period t",
+      "label": "dc_to_customer_shipments",
+      "domain": [
+        "DistributionCenters",
+        "Customers",
+        "Products",
+        "Periods"
+      ],
+      "type": "continuous",
+      "lower_bound": 0,
+      "upper_bound": null,
+      "upper_bound_set": null,
+      "exclude_diagonal": false,
+      "domain_filter": "transport_cost_dc_to_cust"
+    },
+    "inv_site": {
+      "description": "Inventory of product p held at production site i at the end of period t",
+      "label": "site_inventory",
+      "domain": [
+        "ProductionSites",
+        "Products",
+        "Periods"
+      ],
+      "type": "continuous",
+      "lower_bound": 0,
+      "upper_bound": null,
+      "upper_bound_set": null,
+      "exclude_diagonal": false
+    },
+    "inv_dc": {
+      "description": "Inventory of product p held at distribution center j at the end of period t",
+      "label": "dc_inventory",
+      "domain": [
+        "DistributionCenters",
+        "Products",
+        "Periods"
+      ],
+      "type": "continuous",
+      "lower_bound": 0,
+      "upper_bound": null,
+      "upper_bound_set": null,
+      "exclude_diagonal": false
+    },
+    "open_site": {
+      "description": "Binary indicator: 1 if production site i is open in period t, 0 otherwise",
+      "label": "site_open_status",
+      "domain": [
+        "ProductionSites",
+        "Periods"
+      ],
+      "type": "binary",
+      "lower_bound": 0,
+      "upper_bound": 1,
+      "upper_bound_set": null,
+      "exclude_diagonal": false
+    },
+    "open_dc": {
+      "description": "Binary indicator: 1 if distribution center j is open in period t, 0 otherwise",
+      "label": "dc_open_status",
+      "domain": [
+        "DistributionCenters",
+        "Periods"
+      ],
+      "type": "binary",
+      "lower_bound": 0,
+      "upper_bound": 1,
+      "upper_bound_set": null,
+      "exclude_diagonal": false
+    }
+  },
+  "constraints": {
+    "production_capacity": {
+      "domain": [
+        "ProductionSites",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "operation": "indexed_sum",
+          "over": [
+            "Products"
+          ],
+          "body": {
+            "type": "variable",
+            "name": "prod",
+            "indices": [
+              "i",
+              "p",
+              "t"
+            ]
+          }
+        },
+        "right": {
+          "operation": "multiply",
+          "left": {
+            "type": "parameter",
+            "name": "production_capacity",
+            "indices": [
+              "i",
+              "t"
+            ]
+          },
+          "right": {
+            "type": "variable",
+            "name": "open_site",
+            "indices": [
+              "i",
+              "t"
+            ]
+          }
+        }
+      },
+      "sense": "<=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      },
+      "sparse_filter": "production_capacity"
+    },
+    "throughput_capacity": {
+      "domain": [
+        "DistributionCenters",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "operation": "indexed_sum",
+          "over": [
+            "Customers:k",
+            "Products:pp"
+          ],
+          "body": {
+            "type": "variable",
+            "name": "flow_dc_to_cust",
+            "indices": [
+              "j",
+              "k",
+              "pp",
+              "t"
+            ]
+          }
+        },
+        "right": {
+          "operation": "multiply",
+          "left": {
+            "type": "parameter",
+            "name": "throughput_capacity",
+            "indices": [
+              "j",
+              "t"
+            ]
+          },
+          "right": {
+            "type": "variable",
+            "name": "open_dc",
+            "indices": [
+              "j",
+              "t"
+            ]
+          }
+        }
+      },
+      "sense": "<=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      },
+      "sparse_filter": "throughput_capacity"
+    },
+    "storage_capacity_site": {
+      "domain": [
+        "ProductionSites",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "operation": "indexed_sum",
+          "over": [
+            "Products"
+          ],
+          "body": {
+            "type": "variable",
+            "name": "inv_site",
+            "indices": [
+              "i",
+              "p",
+              "t"
+            ]
+          }
+        },
+        "right": {
+          "operation": "multiply",
+          "left": {
+            "type": "parameter",
+            "name": "storage_capacity_site",
+            "indices": [
+              "i"
+            ]
+          },
+          "right": {
+            "type": "variable",
+            "name": "open_site",
+            "indices": [
+              "i",
+              "t"
+            ]
+          }
+        }
+      },
+      "sense": "<=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      },
+      "sparse_filter": "storage_capacity_site"
+    },
+    "storage_capacity_dc": {
+      "domain": [
+        "DistributionCenters",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "operation": "indexed_sum",
+          "over": [
+            "Products"
+          ],
+          "body": {
+            "type": "variable",
+            "name": "inv_dc",
+            "indices": [
+              "j",
+              "p",
+              "t"
+            ]
+          }
+        },
+        "right": {
+          "operation": "multiply",
+          "left": {
+            "type": "parameter",
+            "name": "storage_capacity_dc",
+            "indices": [
+              "j"
+            ]
+          },
+          "right": {
+            "type": "variable",
+            "name": "open_dc",
+            "indices": [
+              "j",
+              "t"
+            ]
+          }
+        }
+      },
+      "sense": "<=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      },
+      "sparse_filter": "storage_capacity_dc"
+    },
+    "demand_fulfillment": {
+      "domain": [
+        "Customers",
+        "Products",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "indexed_sum",
+        "over": [
+          "DistributionCenters:j"
+        ],
+        "body": {
+          "type": "variable",
+          "name": "flow_dc_to_cust",
+          "indices": [
+            "j",
+            "k",
+            "p",
+            "t"
+          ]
+        }
+      },
+      "sense": "=",
+      "rhs": {
+        "type": "parameter",
+        "name": "demand",
+        "indices": [
+          "k",
+          "p",
+          "t"
+        ]
+      }
+    },
+    "inbound_dc_open": {
+      "domain": [
+        "DistributionCenters",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "operation": "indexed_sum",
+          "over": [
+            "ProductionSites:i",
+            "Products:pp"
+          ],
+          "body": {
+            "type": "variable",
+            "name": "flow_prod_to_dc",
+            "indices": [
+              "i",
+              "j",
+              "pp",
+              "t"
+            ]
+          }
+        },
+        "right": {
+          "operation": "multiply",
+          "left": {
+            "type": "parameter",
+            "name": "bigM",
+            "indices": []
+          },
+          "right": {
+            "type": "variable",
+            "name": "open_dc",
+            "indices": [
+              "j",
+              "t"
+            ]
+          }
+        }
+      },
+      "sense": "<=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      }
+    },
+    "nonclose_site": {
+      "domain": [
+        "ProductionSites",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "type": "variable",
+          "name": "open_site",
+          "indices": [
+            "i",
+            "t"
+          ],
+          "lag": 0
+        },
+        "right": {
+          "type": "variable",
+          "name": "open_site",
+          "indices": [
+            "i",
+            "t"
+          ],
+          "lag": -1
+        }
+      },
+      "sense": ">=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      }
+    },
+    "nonclose_dc": {
+      "domain": [
+        "DistributionCenters",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "type": "variable",
+          "name": "open_dc",
+          "indices": [
+            "j",
+            "t"
+          ],
+          "lag": 0
+        },
+        "right": {
+          "type": "variable",
+          "name": "open_dc",
+          "indices": [
+            "j",
+            "t"
+          ],
+          "lag": -1
+        }
+      },
+      "sense": ">=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      }
+    },
+    "inv_balance_site_init": {
+      "domain": [
+        "ProductionSites",
+        "Products"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "operation": "sum",
+          "left": {
+            "type": "parameter",
+            "name": "initial_inventory_site",
+            "indices": [
+              "i",
+              "p"
+            ]
+          },
+          "right": {
+            "type": "variable",
+            "name": "prod",
+            "indices": [
+              "i",
+              "p",
+              "Periods[0]"
+            ]
+          }
+        },
+        "right": {
+          "operation": "sum",
+          "left": {
+            "operation": "indexed_sum",
+            "over": [
+              "DistributionCenters:j"
+            ],
+            "body": {
+              "type": "variable",
+              "name": "flow_prod_to_dc",
+              "indices": [
+                "i",
+                "j",
+                "p",
+                "Periods[0]"
+              ]
+            }
+          },
+          "right": {
+            "type": "variable",
+            "name": "inv_site",
+            "indices": [
+              "i",
+              "p",
+              "Periods[0]"
+            ]
+          }
+        }
+      },
+      "sense": "=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      }
+    },
+    "inv_balance_site": {
+      "domain": [
+        "ProductionSites",
+        "Products",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "operation": "sum",
+          "left": {
+            "type": "variable",
+            "name": "inv_site",
+            "indices": [
+              "i",
+              "p",
+              "t"
+            ],
+            "lag": -1
+          },
+          "right": {
+            "type": "variable",
+            "name": "prod",
+            "indices": [
+              "i",
+              "p",
+              "t"
+            ]
+          }
+        },
+        "right": {
+          "operation": "sum",
+          "left": {
+            "operation": "indexed_sum",
+            "over": [
+              "DistributionCenters:j"
+            ],
+            "body": {
+              "type": "variable",
+              "name": "flow_prod_to_dc",
+              "indices": [
+                "i",
+                "j",
+                "p",
+                "t"
+              ]
+            }
+          },
+          "right": {
+            "type": "variable",
+            "name": "inv_site",
+            "indices": [
+              "i",
+              "p",
+              "t"
+            ]
+          }
+        }
+      },
+      "sense": "=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      }
+    },
+    "inv_balance_dc_init": {
+      "domain": [
+        "DistributionCenters",
+        "Products"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "operation": "sum",
+          "left": {
+            "type": "parameter",
+            "name": "initial_inventory_dc",
+            "indices": [
+              "j",
+              "p"
+            ]
+          },
+          "right": {
+            "operation": "indexed_sum",
+            "over": [
+              "ProductionSites:i"
+            ],
+            "body": {
+              "type": "variable",
+              "name": "flow_prod_to_dc",
+              "indices": [
+                "i",
+                "j",
+                "p",
+                "Periods[0]"
+              ]
+            }
+          }
+        },
+        "right": {
+          "operation": "sum",
+          "left": {
+            "operation": "indexed_sum",
+            "over": [
+              "Customers:k"
+            ],
+            "body": {
+              "type": "variable",
+              "name": "flow_dc_to_cust",
+              "indices": [
+                "j",
+                "k",
+                "p",
+                "Periods[0]"
+              ]
+            }
+          },
+          "right": {
+            "type": "variable",
+            "name": "inv_dc",
+            "indices": [
+              "j",
+              "p",
+              "Periods[0]"
+            ]
+          }
+        }
+      },
+      "sense": "=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      }
+    },
+    "inv_balance_dc": {
+      "domain": [
+        "DistributionCenters",
+        "Products",
+        "Periods"
+      ],
+      "expression": {
+        "operation": "subtract",
+        "left": {
+          "operation": "sum",
+          "left": {
+            "type": "variable",
+            "name": "inv_dc",
+            "indices": [
+              "j",
+              "p",
+              "t"
+            ],
+            "lag": -1
+          },
+          "right": {
+            "operation": "indexed_sum",
+            "over": [
+              "ProductionSites:i"
+            ],
+            "body": {
+              "type": "variable",
+              "name": "flow_prod_to_dc",
+              "indices": [
+                "i",
+                "j",
+                "p",
+                "t"
+              ]
+            }
+          }
+        },
+        "right": {
+          "operation": "sum",
+          "left": {
+            "operation": "indexed_sum",
+            "over": [
+              "Customers:k"
+            ],
+            "body": {
+              "type": "variable",
+              "name": "flow_dc_to_cust",
+              "indices": [
+                "j",
+                "k",
+                "p",
+                "t"
+              ]
+            }
+          },
+          "right": {
+            "type": "variable",
+            "name": "inv_dc",
+            "indices": [
+              "j",
+              "p",
+              "t"
+            ]
+          }
+        }
+      },
+      "sense": "=",
+      "rhs": {
+        "type": "constant",
+        "value": 0
+      }
+    }
+  },
+  "objective": {
+    "sense": "maximize",
+    "expression": {
+      "operation": "subtract",
+      "left": {
+        "operation": "subtract",
+        "left": {
+          "operation": "subtract",
+          "left": {
+            "operation": "subtract",
+            "left": {
+              "operation": "subtract",
+              "left": {
+                "operation": "subtract",
+                "left": {
+                  "operation": "subtract",
+                  "left": {
+                    "operation": "subtract",
+                    "left": {
+                      "operation": "indexed_sum",
+                      "over": [
+                        "DistributionCenters:j",
+                        "Customers:k",
+                        "Products:p",
+                        "Periods:t"
+                      ],
+                      "body": {
+                        "operation": "multiply",
+                        "left": {
+                          "type": "parameter",
+                          "name": "revenue",
+                          "indices": [
+                            "p"
+                          ]
+                        },
+                        "right": {
+                          "type": "variable",
+                          "name": "flow_dc_to_cust",
+                          "indices": [
+                            "j",
+                            "k",
+                            "p",
+                            "t"
+                          ]
+                        }
+                      }
+                    },
+                    "right": {
+                      "operation": "indexed_sum",
+                      "over": [
+                        "ProductionSites:i",
+                        "Products:p",
+                        "Periods:t"
+                      ],
+                      "body": {
+                        "operation": "multiply",
+                        "left": {
+                          "type": "parameter",
+                          "name": "production_cost",
+                          "indices": [
+                            "i",
+                            "p"
+                          ]
+                        },
+                        "right": {
+                          "type": "variable",
+                          "name": "prod",
+                          "indices": [
+                            "i",
+                            "p",
+                            "t"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "operation": "indexed_sum",
+                    "over": [
+                      "ProductionSites:i",
+                      "DistributionCenters:j",
+                      "Products:p",
+                      "Periods:t"
+                    ],
+                    "body": {
+                      "operation": "multiply",
+                      "left": {
+                        "type": "parameter",
+                        "name": "transport_cost_prod_to_dc",
+                        "indices": [
+                          "i",
+                          "j"
+                        ]
+                      },
+                      "right": {
+                        "type": "variable",
+                        "name": "flow_prod_to_dc",
+                        "indices": [
+                          "i",
+                          "j",
+                          "p",
+                          "t"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "operation": "indexed_sum",
+                  "over": [
+                    "DistributionCenters:j",
+                    "Customers:k",
+                    "Products:p",
+                    "Periods:t"
+                  ],
+                  "body": {
+                    "operation": "multiply",
+                    "left": {
+                      "type": "parameter",
+                      "name": "transport_cost_dc_to_cust",
+                      "indices": [
+                        "j",
+                        "k"
+                      ]
+                    },
+                    "right": {
+                      "type": "variable",
+                      "name": "flow_dc_to_cust",
+                      "indices": [
+                        "j",
+                        "k",
+                        "p",
+                        "t"
+                      ]
+                    }
+                  }
+                }
+              },
+              "right": {
+                "operation": "indexed_sum",
+                "over": [
+                  "ProductionSites:i",
+                  "Products:p",
+                  "Periods:t"
+                ],
+                "body": {
+                  "operation": "multiply",
+                  "left": {
+                    "type": "parameter",
+                    "name": "holding_cost_site",
+                    "indices": [
+                      "i",
+                      "p"
+                    ]
+                  },
+                  "right": {
+                    "type": "variable",
+                    "name": "inv_site",
+                    "indices": [
+                      "i",
+                      "p",
+                      "t"
+                    ]
+                  }
+                }
+              }
+            },
+            "right": {
+              "operation": "indexed_sum",
+              "over": [
+                "DistributionCenters:j",
+                "Products:p",
+                "Periods:t"
+              ],
+              "body": {
+                "operation": "multiply",
+                "left": {
+                  "type": "parameter",
+                  "name": "holding_cost_dc",
+                  "indices": [
+                    "j",
+                    "p"
+                  ]
+                },
+                "right": {
+                  "type": "variable",
+                  "name": "inv_dc",
+                  "indices": [
+                    "j",
+                    "p",
+                    "t"
+                  ]
+                }
+              }
+            }
+          },
+          "right": {
+            "operation": "indexed_sum",
+            "over": [
+              "ProductionSites:i"
+            ],
+            "body": {
+              "operation": "multiply",
+              "left": {
+                "type": "parameter",
+                "name": "fixed_cost_open_site",
+                "indices": [
+                  "i"
+                ]
+              },
+              "right": {
+                "type": "variable",
+                "name": "open_site",
+                "indices": [
+                  "i",
+                  "Periods[-1]"
+                ]
+              }
+            }
+          }
+        },
+        "right": {
+          "operation": "indexed_sum",
+          "over": [
+            "DistributionCenters:j"
+          ],
+          "body": {
+            "operation": "multiply",
+            "left": {
+              "type": "parameter",
+              "name": "fixed_cost_open_dc",
+              "indices": [
+                "j"
+              ]
+            },
+            "right": {
+              "type": "variable",
+              "name": "open_dc",
+              "indices": [
+                "j",
+                "Periods[-1]"
+              ]
+            }
+          }
+        }
+      },
+      "right": {
+        "operation": "sum",
+        "left": {
+          "operation": "indexed_sum",
+          "over": [
+            "ProductionSites:i",
+            "Periods:t"
+          ],
+          "body": {
+            "operation": "multiply",
+            "left": {
+              "type": "parameter",
+              "name": "operating_cost_site",
+              "indices": [
+                "i"
+              ]
+            },
+            "right": {
+              "type": "variable",
+              "name": "open_site",
+              "indices": [
+                "i",
+                "t"
+              ]
+            }
+          }
+        },
+        "right": {
+          "operation": "indexed_sum",
+          "over": [
+            "DistributionCenters:j",
+            "Periods:t"
+          ],
+          "body": {
+            "operation": "multiply",
+            "left": {
+              "type": "parameter",
+              "name": "operating_cost_dc",
+              "indices": [
+                "j"
+              ]
+            },
+            "right": {
+              "type": "variable",
+              "name": "open_dc",
+              "indices": [
+                "j",
+                "t"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
