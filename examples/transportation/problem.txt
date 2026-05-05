@@ -9,8 +9,13 @@ Customer demand:
 - C2 requires exactly 40 units
 - C3 requires exactly 30 units
 
-Shipping cost per unit:
-- W1 to C1: $2, W1 to C2: $3, W1 to C3: $1
-- W2 to C1: $5, W2 to C2: $4, W2 to C3: $8
+Location coordinates (x, y):
+- W1: (1, 4)
+- W2: (1, 8)
+- C1: (5, 1)
+- C2: (8, 6)
+- C3: (4, 10)
+
+Shipping cost is $1 per unit shipped per unit of Euclidean distance between source and destination.
 
 How many units should I ship from each warehouse to each customer to minimize total cost?

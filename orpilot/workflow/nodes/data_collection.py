@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,9 @@ from orpilot.models.data import CsvFileSpec, UserData
 from orpilot.paths import DATA_DIR
 from orpilot.prompts import data_guide
 from orpilot.workflow.state import WorkflowState
+
+
+_SUBSTITUTION_RE = re.compile(r'\[SUBSTITUTION:([^\]]+)\]')
 
 
 def _compress_data_ctx(
@@ -134,7 +138,15 @@ def _phase_spec(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
 
         updates["csv_specs"] = spec_dicts
 
-        clean = response.replace("[DATA_SPEC_READY]", "").strip()
+        # Extract any [SUBSTITUTION: ...] notes (unlikely in phase 1, but handle it)
+        new_notes = [m.strip() for m in _SUBSTITUTION_RE.findall(response)]
+        if new_notes:
+            existing_notes = list(state.get("substitution_notes") or [])
+            updates["substitution_notes"] = existing_notes + [
+                n for n in new_notes if n not in existing_notes
+            ]
+
+        clean = _SUBSTITUTION_RE.sub("", response).replace("[DATA_SPEC_READY]", "").strip()
         ready_msg = (
             f"{clean}\n\n"
             f"Please place the CSV files in: `{data_dir}`\n"
@@ -279,7 +291,13 @@ def _phase_confirm(
         )
 
         new_spec_dicts = [s.model_dump() for s in spec_result.specs]
-        clean = response.replace("[DATA_SPEC_READY]", "").strip()
+
+        # Extract [SUBSTITUTION: ...] notes and strip them from the displayed message
+        new_notes = [m.strip() for m in _SUBSTITUTION_RE.findall(response)]
+        existing_notes: list[str] = list(state.get("substitution_notes") or [])
+        all_notes = existing_notes + [n for n in new_notes if n not in existing_notes]
+
+        clean = _SUBSTITUTION_RE.sub("", response).replace("[DATA_SPEC_READY]", "").strip()
         updated_msg = (
             f"{clean}\n\n"
             f"Please place the updated CSV files in: `{data_dir}`\n"
@@ -290,6 +308,7 @@ def _phase_confirm(
         updates["messages"] = messages
         updates["messages_ctx"] = messages_ctx
         updates["csv_specs"] = new_spec_dicts
+        updates["substitution_notes"] = all_notes
         updates["needs_user_input"] = True
         return {**state, **updates}
 

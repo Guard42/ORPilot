@@ -66,6 +66,19 @@ def param_computation_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
     table_schemas = _describe_tables(user_data)
     problem_json = problem.model_dump_json(indent=2) if problem else "{}"
 
+    substitution_notes: list[str] = list(state.get("substitution_notes") or [])
+    if substitution_notes:
+        notes_block = "\n".join(f"  - {n}" for n in substitution_notes)
+        substitution_notes_section = (
+            "\nData substitution notes (from the data collection step — the user provided "
+            "alternative raw data instead of the originally required parameters; compute "
+            "the missing parameters from the raw data as described):\n"
+            + notes_block
+            + "\n"
+        )
+    else:
+        substitution_notes_section = ""
+
     messages: list[dict] = [
         {"role": "system", "content": prompts.SYSTEM_PROMPT},
         {
@@ -73,6 +86,7 @@ def param_computation_node(state: WorkflowState, llm: BaseLLM) -> WorkflowState:
             "content": prompts.USER_PROMPT_TEMPLATE.format(
                 problem_json=problem_json,
                 table_schemas=table_schemas,
+                substitution_notes_section=substitution_notes_section,
             ),
         },
     ]

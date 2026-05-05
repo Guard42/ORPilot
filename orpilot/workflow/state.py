@@ -55,6 +55,10 @@ class WorkflowState(TypedDict, total=False):
     data_dir: str
     csv_specs: list
 
+    # Substitution notes from data collection: each entry describes what the user
+    # provided as a substitute and what param_computation must derive from it.
+    substitution_notes: list[str]
+
     # Debug output
     output_dir: str
 

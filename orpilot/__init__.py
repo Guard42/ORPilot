@@ -12,7 +12,11 @@ Usage::
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+from importlib.metadata import version, PackageNotFoundError
+try:
+    __version__ = version("orpilot")
+except PackageNotFoundError:
+    __version__ = "0.0.0+dev"
 
 from typing import Any
 

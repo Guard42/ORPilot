@@ -8,7 +8,9 @@ ORPilot is an open-source AI agent that turns natural-language business problems
 [![OpenAI · Anthropic · Google · DeepSeek](https://img.shields.io/badge/LLMs-OpenAI%20%7C%20Anthropic%20%7C%20Google%20%7C%20DeepSeek-orange.svg)]()
 [![Paper](https://img.shields.io/badge/paper-working%20paper-blue.svg)](PAPER_URL)
 
-> 📄 [PAPER_TITLE](PAPER_URL) — Guangrui Xie, 2026
+> 📄 [ORPilot: A Production-Oriented Agentic LLM-for-OR Tool for Optimization Modeling](https://arxiv.org/abs/2605.02728) — Guangrui Xie, 2026
+
+The data used for testing in the experiments section (Section 4) of this paper can be found in the release assets of v0.1.0 release.
 
 ---
 
@@ -268,7 +270,7 @@ PS_047             ──────► DC_041, DC_044
 
 **Solution report (excerpt):**
 
-Here is an example solution report given by ORPilot for this demo problem. 
+Here is an example solution report excerpt given by ORPilot for this demo problem. 
 
 ```
 **Status:** Optimal | **Objective:** −$1,419,138 | **Solve time:** 0.07s
@@ -567,4 +569,4 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-*ORPilot is actively developed. Benchmark numbers reflect accuracy results as of March 2026.*
+*ORPilot is actively developed. Benchmark numbers reflect accuracy results as of May 2026.*

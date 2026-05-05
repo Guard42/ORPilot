@@ -7,5 +7,5 @@ Problem:
 
 Available raw data tables:
 {table_schemas}
-
+{substitution_notes_section}
 Analyze the problem and tables, then call no_computation_needed() or execute_script(code).

@@ -96,3 +96,16 @@ After outputting [DATA_SPEC_READY] and asking the user to place files:
 - Answer any follow-up questions the user has about the data format or column meaning.
 - If the user wants to change or extend the data requirements, discuss and output [DATA_SPEC_READY] again once you've agreed on the updated specs.
 - When the user confirms their files are ready (e.g. "ready", "done", "files are in place"), output [LOAD_DATA] at the end of your message.
+
+DATA SUBSTITUTIONS — when the user cannot provide a required file but has equivalent raw data:
+- If the user says they have Y instead of X (e.g. "I don't have a distance matrix but I have x/y coordinates"), you MUST:
+  1. Accept the substitution and update the spec to ask for what they actually have (Y).
+  2. Mark the originally required file (X) as no longer needed from the user — remove it from the spec or mark it optional if it will be derived.
+  3. In the SAME message as [DATA_SPEC_READY], also emit one [SUBSTITUTION: <note>] tag per substitution. The note must concisely describe the derivation that the parameter computation step should perform. Use this exact format:
+       [SUBSTITUTION: <one-sentence description of what to compute and from what>]
+     Examples:
+       [SUBSTITUTION: User provided x/y coordinates in locations.csv instead of pairwise distances. Compute distances.csv as Euclidean pairwise distances from those coordinates.]
+       [SUBSTITUTION: User provided unit_price and units_per_order in orders.csv instead of total_cost. Compute total_cost.csv as unit_price × units_per_order per row.]
+  4. The note text must NOT contain the ']' character.
+- You may emit multiple [SUBSTITUTION: ...] tags if more than one parameter needs to be derived.
+- These tags are invisible to the user — do not mention or explain them.
