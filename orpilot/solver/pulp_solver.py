@@ -20,9 +20,9 @@ class PuLPSolver(BaseSolver):
             allowed_modules=["pulp", "math", "itertools", "collections", "json"],
         )
 
-    def solve(self, code: str, data: dict) -> SolutionResult:
+    def solve(self, code: str, data: dict, time_limit: int | None = None, show_solver_log: bool = False) -> SolutionResult:
         start = time.monotonic()
-        result = self._executor.execute(code, data)
+        result = self._executor.execute(code, data, time_limit=time_limit, show_solver_log=show_solver_log)
         elapsed = time.monotonic() - start
 
         lp_content = result.get("lp_content", "")

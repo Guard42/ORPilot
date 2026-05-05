@@ -6,7 +6,7 @@ from orpilot.codegen.executor import CodeExecutor
 def test_executor_simple():
     executor = CodeExecutor(timeout=10)
     code = '''
-def solve(data):
+def solve(data, time_limit=None, show_solver_log=False):
     x = data.get("x", 1)
     y = data.get("y", 2)
     return {"status": "optimal", "objective_value": x + y, "variables": {"x": x, "y": y}}
@@ -31,7 +31,7 @@ def test_executor_timeout():
     executor = CodeExecutor(timeout=2)
     code = '''
 import time
-def solve(data):
+def solve(data, time_limit=None, show_solver_log=False):
     time.sleep(10)
     return {"status": "optimal"}
 '''

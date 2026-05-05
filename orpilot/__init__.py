@@ -12,12 +12,19 @@ Usage::
 
 from __future__ import annotations
 
+from importlib.metadata import version, PackageNotFoundError
+try:
+    __version__ = version("orpilot")
+except PackageNotFoundError:
+    __version__ = "0.0.0+dev"
+
 from typing import Any
 
 from orpilot.llm.config import LLMConfig, get_llm
 from orpilot.models.problem import ProblemDefinition
 from orpilot.models.data import UserData, DataParameter
 from orpilot.models.solution import SolutionResult
+from orpilot.paths import DATA_DIR
 from orpilot.workflow.graph import build_graph
 
 
@@ -32,8 +39,10 @@ class Agent:
         api_key: str | None = None,
         base_url: str | None = None,
         max_retries: int = 3,
-        data_dir: str = "./data",
+        data_dir: str = str(DATA_DIR),
         output_dir: str | None = None,
+        solver_time_limit: int | None = None,
+        show_solver_log: bool = False,
     ):
         self._llm_config = LLMConfig(
             provider=llm_provider,
@@ -46,6 +55,8 @@ class Agent:
         self._max_retries = max_retries
         self._data_dir = data_dir
         self._output_dir = output_dir
+        self._solver_time_limit = solver_time_limit
+        self._show_solver_log = show_solver_log
         self._graph = build_graph(llm=self._llm)
 
     def run(
@@ -84,6 +95,7 @@ class Agent:
             "messages": [],
             "problem": None,
             "user_data": None,
+            "ir_model": None,
             "generated_code": "",
             "solution": None,
             "report": "",
@@ -98,6 +110,8 @@ class Agent:
             "data_dir": resolved_dir,
             "csv_specs": [],
             "output_dir": resolved_output,
+            "solver_time_limit": self._solver_time_limit,
+            "show_solver_log": self._show_solver_log,
         }
 
         # Pre-populate problem
@@ -111,7 +125,7 @@ class Agent:
         if isinstance(data, UserData):
             state["user_data"] = data
             if state.get("problem"):
-                state["current_node"] = "model_builder"
+                state["current_node"] = "ir_builder"
         elif isinstance(data, dict):
             params = [
                 DataParameter(name=k, value=v)
@@ -119,7 +133,7 @@ class Agent:
             ]
             state["user_data"] = UserData(parameters=params)
             if state.get("problem"):
-                state["current_node"] = "model_builder"
+                state["current_node"] = "ir_builder"
 
         while True:
             result = self._graph.invoke(state)

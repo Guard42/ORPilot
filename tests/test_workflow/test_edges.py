@@ -18,7 +18,7 @@ def test_after_interview_incomplete():
 
 def test_after_data_collection_complete():
     state = {"user_data": UserData()}
-    assert after_data_collection(state) == "model_builder"
+    assert after_data_collection(state) == "param_computation"
 
 
 def test_after_data_collection_incomplete():
@@ -37,7 +37,7 @@ def test_after_solver_error_with_retries():
         "retry_count": 1,
         "max_retries": 3,
     }
-    assert after_solver_runner(state) == "model_builder"
+    assert after_solver_runner(state) == "direct_code_gen"
 
 
 def test_after_solver_error_exhausted():

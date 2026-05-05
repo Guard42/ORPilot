@@ -1,0 +1,3 @@
+Status: optimal
+Objective Value: -1419138.19
+Solve Time: 0.0660s

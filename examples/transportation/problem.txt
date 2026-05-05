@@ -1,0 +1,21 @@
+I need to ship goods from two warehouses to three customers at minimum cost.
+
+Warehouse supply:
+- W1 can supply up to 50 units
+- W2 can supply up to 60 units
+
+Customer demand:
+- C1 requires exactly 30 units
+- C2 requires exactly 40 units
+- C3 requires exactly 30 units
+
+Location coordinates (x, y):
+- W1: (1, 4)
+- W2: (1, 8)
+- C1: (5, 1)
+- C2: (8, 6)
+- C3: (4, 10)
+
+Shipping cost is $1 per unit shipped per unit of Euclidean distance between source and destination.
+
+How many units should I ship from each warehouse to each customer to minimize total cost?
