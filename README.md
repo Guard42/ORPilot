@@ -58,9 +58,48 @@ Blue indicates a LLM-involved step and orange indicates a deterministic step.
 
 ## Quick Start
 
+**Step 1 — Install Python 3.10+**
+
+*Windows:* Download and run the installer from [python.org](https://www.python.org/downloads/). Make sure Python is added to **PATH**.
+
+*Linux (Debian/Ubuntu):*
+```bash
+sudo apt update && sudo apt install python3 python3-pip python3-venv
+```
+
+**Step 2 — Clone the repo and create a virtual environment**
+
 ```bash
 git clone https://github.com/GuangruiXieVT/ORPilot
-cd orpilot
+cd ORPilot
+```
+
+*Windows (Command Prompt):*
+```cmd
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+*Windows (PowerShell):*
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+> If you see a "running scripts is disabled" error, run this once to allow local scripts for your user (no admin required), then retry.
+> ```powershell
+> Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+> ```
+> Alternatively, use **Command Prompt** instead of PowerShell — the CMD activation command works without any policy changes.
+
+*Linux:*
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+**Step 3 — Install ORPilot and all solver dependencies**
+
+```bash
 pip install -e ".[all-solvers]"
 ```
 
@@ -555,8 +594,10 @@ After every successful solve, ORPilot writes `metrics.json` to the output direct
 Contributions are welcome — new benchmark cases, solver backends, LLM providers, or prompt improvements.
 
 ```bash
-git clone https://github.com/your-org/orpilot
-cd orpilot
+git clone https://github.com/GuangruiXieVT/ORPilot
+cd ORPilot
+python -m venv .venv
+.venv\Scripts\activate  # Linux: source .venv/bin/activate  
 pip install -e ".[dev]"
 pytest
 ```
