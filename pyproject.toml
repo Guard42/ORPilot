@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "orpilot"
+name = "or-copilot"
 version = "0.1.0"
-description = "ORPilot — AI Operations Research Agent — LLM-powered OR modeling and solving"
+description = "OR-Copilot — AI Operations Research Agent — LLM-powered OR modeling and solving"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    { name = "ORPilot Contributors" },
+    { name = "OR-Copilot Contributors" },
 ]
 keywords = ["operations research", "optimization", "llm", "ai", "pulp", "pyomo", "or-tools"]
 classifiers = [

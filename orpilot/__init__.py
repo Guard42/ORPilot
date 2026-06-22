@@ -1,4 +1,4 @@
-"""ORPilot — AI Operations Research Agent Library.
+"""OR-Copilot — AI Operations Research Agent Library.
 
 Usage::
 

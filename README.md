@@ -1,6 +1,6 @@
-# ORPilot — AI Operations Research Modeling Agent
+# OR-Copilot — AI Operations Research Modeling Agent
 
-ORPilot is an open-source AI agent that turns natural-language business problems into working optimization models — automatically handling data ingestion, model formulation, and code generation across multiple solver backends with LLMs from multiple providers.
+OR-Copilot is an open-source AI agent that turns natural-language business problems into working optimization models — automatically handling data ingestion, model formulation, and code generation across multiple solver backends with LLMs from multiple providers.
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -8,25 +8,25 @@ ORPilot is an open-source AI agent that turns natural-language business problems
 [![OpenAI · Anthropic · Google · DeepSeek](https://img.shields.io/badge/LLMs-OpenAI%20%7C%20Anthropic%20%7C%20Google%20%7C%20DeepSeek-orange.svg)]()
 [![Paper](https://img.shields.io/badge/paper-working%20paper-blue.svg)](PAPER_URL)
 
-> 📄 [ORPilot: A Production-Oriented Agentic LLM-for-OR Tool for Optimization Modeling](https://arxiv.org/abs/2605.02728) — Guangrui Xie, 2026
+> 📄 [OR-Copilot: A Production-Oriented Agentic LLM-for-OR Tool for Optimization Modeling](https://arxiv.org/abs/2605.02728) — Guangrui Xie, 2026
 
 The data used for testing in the experiments section (Section 4) of this paper can be found in the release assets of v0.1.0 release.
 
 ---
 
-## Why ORPilot?
+## Why OR-Copilot?
 
-Most existing LLM-OR tools were created in a pure academic setting, where the problem description is clear and solver-ready data are already available — essentially solving a textbook OR problem. Building a working OR model from a real-world business problem is far more complicated. ORPilot is designed for that harder case.
+Most existing LLM-OR tools were created in a pure academic setting, where the problem description is clear and solver-ready data are already available — essentially solving a textbook OR problem. Building a working OR model from a real-world business problem is far more complicated. OR-Copilot is designed for that harder case.
 
-**First, problem understanding is iterative.** Business users rarely articulate a complete, unambiguous problem specification in one go. ORPilot's interview agent asks targeted clarifying questions until the problem is fully understood before any modelling begins — just as a human consultant would.
+**First, problem understanding is iterative.** Business users rarely articulate a complete, unambiguous problem specification in one go. OR-Copilot's interview agent asks targeted clarifying questions until the problem is fully understood before any modelling begins — just as a human consultant would.
 
-**Second, data lives outside the prompt.** Real-world datasets are too large to embed in a language model context. ORPilot's data collection agent defines exactly what tabular data is needed (column names, types, semantics), guides the user to supply it as CSVs, and validates completeness before proceeding.
+**Second, data lives outside the prompt.** Real-world datasets are too large to embed in a language model context. OR-Copilot's data collection agent defines exactly what tabular data is needed (column names, types, semantics), guides the user to supply it as CSVs, and validates completeness before proceeding.
 
-**Third, raw data is not the same as model parameters.** Given city coordinates, a routing model needs a distance matrix. Given transaction records, a scheduling model needs aggregated per-period costs. ORPilot's **parameter computation step** bridges this gap: it inspects the raw tables, identifies what derived quantities the model will need, generates and executes a Python script to compute them, and makes the results available as additional CSVs — so code generation always receives model-ready inputs.
+**Third, raw data is not the same as model parameters.** Given city coordinates, a routing model needs a distance matrix. Given transaction records, a scheduling model needs aggregated per-period costs. OR-Copilot's **parameter computation step** bridges this gap: it inspects the raw tables, identifies what derived quantities the model will need, generates and executes a Python script to compute them, and makes the results available as additional CSVs — so code generation always receives model-ready inputs.
 
-**Fourth, reproducibility and portability matter for production.** ORPilot produces an **Intermediate Representation (IR)** — a compact JSON blob that captures all the information needed to reconstruct the OR model. Compiling from IR to solver code is fully deterministic. This means you can reproduce results, switch solver backends, or re-run the model on another machine without making any LLM calls.
+**Fourth, reproducibility and portability matter for production.** OR-Copilot produces an **Intermediate Representation (IR)** — a compact JSON blob that captures all the information needed to reconstruct the OR model. Compiling from IR to solver code is fully deterministic. This means you can reproduce results, switch solver backends, or re-run the model on another machine without making any LLM calls.
 
-**Finally, generated solver code is rarely perfect on the first attempt.** ORPilot wraps code generation in a **self-correcting retry loop** that feeds solver errors, infeasibility signals, and tracebacks back to the LLM for targeted repairs.
+**Finally, generated solver code is rarely perfect on the first attempt.** OR-Copilot wraps code generation in a **self-correcting retry loop** that feeds solver errors, infeasibility signals, and tracebacks back to the LLM for targeted repairs.
 
 ### Interactive pipeline
 ![Pipeline overview](assets/interactive_pipeline.png)
@@ -43,7 +43,7 @@ Blue indicates a LLM-involved step and orange indicates a deterministic step.
 
 ### Key differentiators
 
-| Feature | ORPilot | 
+| Feature | OR-Copilot | 
 |---|:---:|
 | Conversational problem intake | ✅ |
 | Automatic data extraction to CSV | ✅ | 
@@ -70,8 +70,8 @@ sudo apt update && sudo apt install python3 python3-pip python3-venv
 **Step 2 — Clone the repo and create a virtual environment**
 
 ```bash
-git clone https://github.com/GuangruiXieVT/ORPilot
-cd ORPilot
+git clone https://github.com/GuangruiXieVT/OR-Copilot
+cd OR-Copilot
 ```
 
 *Windows (Command Prompt):*
@@ -97,7 +97,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-**Step 3 — Install ORPilot and all solver dependencies**
+**Step 3 — Install OR-Copilot and all solver dependencies**
 
 ```bash
 pip install -e ".[all-solvers]"
@@ -112,7 +112,7 @@ export OPENAI_API_KEY=sk-...       # OpenAI
 # export OPENAI_API_KEY=sk-...     # DeepSeek — uses the OpenAI-compatible SDK, so set OPENAI_API_KEY to your DeepSeek key and configure base_url in orpilot.toml (see below)
 ```
 
-It is recommended to manage your configurations in `orpilot.toml`. ORPilot picks up the configurations here automatically. CLI flags take precedence over values set here.
+It is recommended to manage your configurations in `orpilot.toml`. OR-Copilot picks up the configurations here automatically. CLI flags take precedence over values set here.
 
 ```toml
 provider        = "openai"        # openai | anthropic | google
@@ -141,9 +141,9 @@ save_data   = false   # save data.json to output_dir, which contains the data ex
 CLI commands:
 
 ```bash
-# ORPilot picks up the configurations from orpilot.toml automatically. CLI flags take precedence over values set there.
+# OR-Copilot picks up the configurations from orpilot.toml automatically. CLI flags take precedence over values set there.
 
-# Interactive session — ORPilot interviews you about your problem. Parameters auto-loaded from orpilot.toml file.
+# Interactive session — OR-Copilot interviews you about your problem. Parameters auto-loaded from orpilot.toml file.
 orpilot run
 
 # Solve a problem described in a plain-text file (non-interactive)
@@ -186,11 +186,11 @@ Requirements: Python 3.10+
 
 This demo problem is a much smaller-scaled version of the test problem in Section 4.2 of this paper: 
 
-This walkthrough shows ORPilot solving a real-world **Mixed-Integer Program** end to end — from a plain-English conversation to an optimal production and distribution plan.
+This walkthrough shows OR-Copilot solving a real-world **Mixed-Integer Program** end to end — from a plain-English conversation to an optimal production and distribution plan.
 
 The user aims to optimize a supply chain network with multiple production sites, distribution centers, and customers. The user wants to decide which facilities to open and when, how much to produce at each site, and how to route products to customers — maximizing total profit over a planning horizon.
 
-ORPilot's interview agent asks clarifying questions to fill in the details: cost structure, capacity types, demand patterns, inventory mechanics, and facility opening logic. Once the problem is fully specified, the data collection agent defines exactly which CSV tables are needed and validates them before solving.
+OR-Copilot's interview agent asks clarifying questions to fill in the details: cost structure, capacity types, demand patterns, inventory mechanics, and facility opening logic. Once the problem is fully specified, the data collection agent defines exactly which CSV tables are needed and validates them before solving.
 
 
 **Interview - user conversation (excerpt):** 
@@ -200,11 +200,11 @@ Here is an excerpt of the conversation history between the interview agent and t
 ```
 # For a full conversation trajectory between the interview agent and user, check demo/output/session.json
 
-ORPilot  What is the primary goal you want to achieve with this optimization model?
+OR-Copilot  What is the primary goal you want to achieve with this optimization model?
 
 User     I'm looking to maximize the profit of a supply chain network.
 
-ORPilot  What are the main decisions you need the model to make to maximize profit?
+OR-Copilot  What are the main decisions you need the model to make to maximize profit?
 
 User     I need to make production decisions for production sites, transportation
          decisions between production sites and distribution centers, transportation
@@ -212,7 +212,7 @@ User     I need to make production decisions for production sites, transportatio
          for production sites and distribution centers. I also need to make decisions
          about which production sites and distribution centers to open and when.
 
-ORPilot  What are the main constraints or limitations in your supply chain network?
+OR-Copilot  What are the main constraints or limitations in your supply chain network?
 
 User     There are production capacities for production sites, throughput capacities
          for distribution centers. Inventory storage capacities for production sites
@@ -220,13 +220,13 @@ User     There are production capacities for production sites, throughput capaci
          must be open to produce products. A distribution center must be open to ship
          products to customers.
 
-ORPilot  Once a production site or distribution center is opened in a period, does it
+OR-Copilot  Once a production site or distribution center is opened in a period, does it
          remain open for all subsequent periods, or can it be closed in later periods?
 
 User     Once a production site or distribution center is opened in a period, it
          remains open for all subsequent periods.
 
-ORPilot  Perfect, I have everything needed. Proceeding to data collection.
+OR-Copilot  Perfect, I have everything needed. Proceeding to data collection.
 ```
 
 **Data collection — user conversation (excerpt):**
@@ -236,7 +236,7 @@ Here is an excerpt of the conversation history between the data collection agent
 ```
 # For a full conversation trajectory between the interview agent and user, check demo/output/session.json
 
-ORPilot  Here is the specification of required CSV data files:
+OR-Copilot  Here is the specification of required CSV data files:
 
   sets.csv — all set members across every category
     Columns: set_name (str), element (str)
@@ -309,7 +309,7 @@ PS_047             ──────► DC_041, DC_044
 
 **Solution report (excerpt):**
 
-Here is an example solution report excerpt given by ORPilot for this demo problem. 
+Here is an example solution report excerpt given by OR-Copilot for this demo problem. 
 
 ```
 **Status:** Optimal | **Objective:** −$1,419,138 | **Solve time:** 0.07s
@@ -342,26 +342,26 @@ Three distribution centres were opened:
 Run the demo yourself following the steps below to replicate the results. 
 
 ```bash
-# Copy demo data into the working data directory, run from root folder of ORPilot
+# Copy demo data into the working data directory, run from root folder of OR-Copilot
 cp -r demo/data/ data/
 
 # Due to the non-determinstic nature of LLMs, the LLM-user conversation trajectory and required CSVs
 # can be different if run from scratch. To ensure the same conversation trajectory and required CSVs,
-# resume from the saved session.json in demo/output folder. Data will be read from ORPilot/data/ folder, and 
-# results will be stored in ORPilot/output/ folder.
+# resume from the saved session.json in demo/output folder. Data will be read from OR-Copilot/data/ folder, and 
+# results will be stored in OR-Copilot/output/ folder.
 orpilot run --session demo/output/session.json --data-dir data/ --output-dir output/
 ```
 
 > **Note:** `demo/output/session.json` contains a `data_dir` field indicating the path to the folder that stores the data. Before running, update that field to the absolute path of your local `data/` directory, e.g.:
 > ```json
-> "data_dir": "/absolute/path/to/your/ORPilot/data"
+> "data_dir": "/absolute/path/to/your/OR-Copilot/data"
 > ```
 
 ---
 
 ## Running the solve from text examples
 
-There are 5 toy example problems in `examples` to test the solve from text pipeline. Each example problem has a text file describing the optimization problem to be solved with in-line data. The problem description and data are ingested into ORPilot for modeling and solving. 
+There are 5 toy example problems in `examples` to test the solve from text pipeline. Each example problem has a text file describing the optimization problem to be solved with in-line data. The problem description and data are ingested into OR-Copilot for modeling and solving. 
 
 ```bash
 # test the example with ir generation
@@ -453,7 +453,7 @@ Pass a directory instead of a file path and `compile-ir` will look for `ir.json`
 
 ## Architecture
 
-ORPilot is built on [LangGraph](https://github.com/langchain-ai/langgraph) with a typed state machine. Each agent node is independently testable and the pipeline is straightforward to extend.
+OR-Copilot is built on [LangGraph](https://github.com/langchain-ai/langgraph) with a typed state machine. Each agent node is independently testable and the pipeline is straightforward to extend.
 
 ```
 orpilot/
@@ -567,7 +567,7 @@ pytest tests/benchmark/test_NLP4LP.py -v
 
 ## Observability
 
-After every successful solve, ORPilot writes `metrics.json` to the output directory with per-node token usage, latency, and retry counts:
+After every successful solve, OR-Copilot writes `metrics.json` to the output directory with per-node token usage, latency, and retry counts:
 
 ```json
 {
@@ -594,8 +594,8 @@ After every successful solve, ORPilot writes `metrics.json` to the output direct
 Contributions are welcome — new benchmark cases, solver backends, LLM providers, or prompt improvements.
 
 ```bash
-git clone https://github.com/GuangruiXieVT/ORPilot
-cd ORPilot
+git clone https://github.com/GuangruiXieVT/OR-Copilot
+cd OR-Copilot
 python -m venv .venv
 .venv\Scripts\activate  # Linux: source .venv/bin/activate  
 pip install -e ".[dev]"
@@ -610,4 +610,4 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-*ORPilot is actively developed. Benchmark numbers reflect accuracy results as of May 2026.*
+*OR-Copilot is actively developed. Benchmark numbers reflect accuracy results as of May 2026.*
