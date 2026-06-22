@@ -1,0 +1,118 @@
+{
+  "name": "or-copilot",
+  "version": "2.0.0",
+  "description": "AI Operations Research Modeling Assistant — automatic optimization model formulation, code generation, and solving from natural language descriptions. Synthesizes best practices from 11 academic papers (OptiMUS, Chain-of-Experts, NL2OR, AutoFormulator, ORLM, OR-LLM-Agent, OR-R1, OptLLM, MA-GTS, MURKA, AutoMILP).",
+  "author": "OR-Copilot Contributors",
+  "license": "MIT",
+  "homepage": "https://github.com/Guard42/ORPilot",
+  "repository": "https://github.com/Guard42/ORPilot",
+  "keywords": ["operations-research", "optimization", "MILP", "LP", "solver", "gurobi", "pulp", "pyomo", "OR-tools", "MCTS", "modeling"],
+  "commands": [
+    {
+      "name": "/orpilot:solve",
+      "file": "commands/solve.md",
+      "description": "Solve an optimization problem from natural language description — runs the full pipeline: interview → classify → solver-fit → extract → formulate → code → verify → solve → report"
+    },
+    {
+      "name": "/orpilot:interview",
+      "file": "commands/interview.md",
+      "description": "Interactive interview session to clarify and structure an operations research problem — saves session.json for resumption"
+    },
+    {
+      "name": "/orpilot:compile-ir",
+      "file": "commands/compile_ir.md",
+      "description": "Compile an IR JSON file to executable solver code (Gurobi/CPLEX/PuLP/Pyomo/OR-Tools) — fully deterministic, zero LLM cost"
+    },
+    {
+      "name": "/orpilot:benchmark",
+      "file": "commands/benchmark.md",
+      "description": "Run benchmarks on IndustryOR, G-REAL, BWOR, NL4OPT, or MAMO datasets to evaluate modeling accuracy"
+    },
+    {
+      "name": "/orpilot:configure",
+      "file": "commands/configure.md",
+      "description": "Configure solver backend, LLM architecture tier (A/B/C), model selection, and knowledge base settings"
+    }
+  ],
+  "agents": [
+    {
+      "name": "or-interviewer",
+      "file": "agents/or_interviewer.md",
+      "description": "Conducts structured interviews to clarify ambiguous OR problem descriptions through targeted questioning — synthesizes ORPilot interview agent + Chain-of-Experts Terminology Interpreter"
+    },
+    {
+      "name": "or-classifier",
+      "file": "agents/or_classifier.md",
+      "description": "Defines and classifies the business problem into OR problem types (TSP / Scheduling / Assignment / Network Flow / Production Planning / ...) — inspired by Chain-of-Experts and OR-LLM-Agent capability classification"
+    },
+    {
+      "name": "or-solver-fit",
+      "file": "agents/or_solver_fit.md",
+      "description": "Analyzes which problem components are solver-suitable vs. better handled by heuristics/rules/human judgment; recommends the technical framework and solving route — inspired by NL2OR solver triage patterns and AutoMILP domain analysis"
+    },
+    {
+      "name": "or-extractor",
+      "file": "agents/or_extractor.md",
+      "description": "Extracts the structured 5-tuple {Sets, Parameters, Decision Variables, Constraints, Objective} from the confirmed problem definition — synthesizes MURKA's extraction approach and MA-GTS's multi-agent information extraction"
+    },
+    {
+      "name": "or-formulator",
+      "file": "agents/or_formulator.md",
+      "description": "Builds the universal IR v2 from structured elements, constructing mathematical formulations with connection graph tracking — synthesizes OptiMUS Formulator, AutoFormulator MCTS, and CoE Modeling Expert"
+    },
+    {
+      "name": "or-coder",
+      "file": "agents/or_coder.md",
+      "description": "Generates solver-specific executable code (Gurobi/CPLEX/PuLP/Pyomo/OR-Tools) from the universal IR — supports both LLM-based code generation and deterministic IR compilation"
+    },
+    {
+      "name": "or-verifier",
+      "file": "agents/or_verifier.md",
+      "description": "Performs 4-layer verification (structural → execution → correctness → equivalence) with OR-LLM-Agent escalation protocol — synthesizes MURKA 4D reward, AutoFormulator SMT equivalence, and CoE Backward Reflection"
+    },
+    {
+      "name": "or-reporter",
+      "file": "agents/or_reporter.md",
+      "description": "Generates human-readable solution reports with decision summaries, variable tables, constraint satisfaction analysis, and visualization suggestions — inspired by NL2OR Report Generator"
+    }
+  ],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "name": "post_extraction_verify",
+        "file": "hooks/post_extraction.md",
+        "description": "Automatically validates structured extraction output (5-tuple completeness, variable consistency, constraint referencing) after the or-extractor agent completes"
+      },
+      {
+        "name": "post_code_gen_check",
+        "file": "hooks/post_code_gen.md",
+        "description": "Automatically performs syntax checking and sandbox execution of generated solver code after the or-coder agent completes"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "name": "user_confirm_intercept",
+        "file": "hooks/on_user_confirm.md",
+        "description": "Intercepts user input during the problem definition / classification / solver-fit confirmation phase to ensure explicit user approval before proceeding to structured extraction"
+      }
+    ]
+  },
+  "requirements": {
+    "python": ">=3.10",
+    "pip_packages": [
+      "or-copilot>=2.0.0",
+      "langgraph>=0.2",
+      "pydantic>=2.0",
+      "typer>=0.9",
+      "rich>=13.0",
+      "python-dotenv>=1.0"
+    ],
+    "optional_solvers": {
+      "gurobi": ["gurobipy>=11.0"],
+      "cplex": ["docplex>=2.21"],
+      "pulp": ["pulp>=2.7"],
+      "pyomo": ["pyomo>=6.0"],
+      "ortools": ["ortools>=9.0"]
+    }
+  }
+}

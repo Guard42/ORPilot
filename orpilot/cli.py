@@ -1122,6 +1122,7 @@ def compile_ir_cmd(
         orpilot compile-ir path/to/ir.json --out path/to/model.py --solver cplex
     """
     from orpilot.codegen.ir_compiler import IRCompiler
+    from orpilot.codegen import solver_registry
 
     # Accept a directory → look for ir.json inside it
     ir_path = ir_path.resolve()
@@ -1164,7 +1165,12 @@ def compile_ir_cmd(
 
     # Compile
     try:
-        code = IRCompiler().compile(ir_model, solver)
+        # Use plugin registry if available, fall back to direct compile
+        backend_cls = solver_registry.get(solver)
+        if backend_cls is not None:
+            code = backend_cls().compile(ir_model)
+        else:
+            code = IRCompiler().compile(ir_model, solver)
     except Exception as exc:
         console.print(f"[red]Compilation failed: {exc}[/red]")
         raise typer.Exit(1)

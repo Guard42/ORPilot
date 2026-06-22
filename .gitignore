@@ -46,3 +46,6 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# LLM-OR relevant papers collection
+or-llm-relevant-papers/

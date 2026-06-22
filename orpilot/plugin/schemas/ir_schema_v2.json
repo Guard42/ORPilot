@@ -1,0 +1,207 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://or-copilot.dev/schemas/ir-v2.json",
+  "title": "OR-Copilot Universal Intermediate Representation v2.0",
+  "description": "Universal IR schema for representing optimization problems in a solver-agnostic format. Synthesizes IR designs from 11 academic papers (OptiMUS, Chain-of-Experts, NL2OR, AutoFormulator, ORLM, OR-LLM-Agent, OR-R1, OptLLM, MA-GTS, MURKA, AutoMILP).",
+  "type": "object",
+  "required": ["schema_version", "problem_class", "problem_type", "sense", "sets", "parameters", "variables", "constraints", "objective"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2.0",
+      "description": "IR schema version for migration compatibility"
+    },
+    "metadata": {
+      "$ref": "#/definitions/IRMetadata"
+    },
+    "problem_class": {
+      "type": "string",
+      "description": "CoE-style problem classification (TSP, Scheduling, Assignment, Network Flow, Production Planning, etc.)"
+    },
+    "problem_type": {
+      "type": "string",
+      "enum": ["LP", "MILP", "MINLP", "CP", "QP", "MIQP", "combinatorial", "graph_theoretic"],
+      "description": "Mathematical problem type"
+    },
+    "sense": {
+      "type": "string",
+      "enum": ["minimize", "maximize"],
+      "description": "Optimization direction"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable problem summary"
+    },
+    "sets": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/definitions/IRSet"},
+      "description": "Index sets with members and dimensionality"
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/definitions/IRParameter"},
+      "description": "Named parameters with shapes and data sources"
+    },
+    "variables": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/definitions/IRVariable"},
+      "description": "Decision variables with types, bounds, and SOS/indicator annotations"
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/definitions/IRConstraint"},
+      "description": "Named constraints with mathematical expressions and technique annotations"
+    },
+    "objective": {
+      "$ref": "#/definitions/IRObjective",
+      "description": "Objective function expression tree"
+    },
+    "connection_graph": {
+      "$ref": "#/definitions/ConnectionGraph",
+      "description": "OptiMUS-inspired graph tracking variable/parameter dependencies per constraint — enables context window management"
+    },
+    "optimization_techniques": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/OptimizationTechnique"},
+      "description": "OptiMUS-inspired: SOS sets, indicator variables, big-M values, linearization annotations"
+    },
+    "linearity_annotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["linear", "quadratic", "general_nonlinear", "convex", "nonconvex"]
+      },
+      "description": "AutoMILP-inspired per-constraint linearity classification"
+    },
+    "domain_annotations": {
+      "type": "object",
+      "description": "MA-GTS-inspired domain-specific metadata (graph type, weights, topology for graph problems; material specs for manufacturing)"
+    },
+    "equivalent_formulations": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "AutoFormulator-inspired: list of IR IDs that are mathematically equivalent to this one"
+    },
+    "provenance": {
+      "$ref": "#/definitions/IRProvenance",
+      "description": "Version, timestamp, LLM used, extraction/verification scores"
+    }
+  },
+  "definitions": {
+    "IRMetadata": {
+      "type": "object",
+      "properties": {
+        "generated_by": {"type": "string"},
+        "timestamp": {"type": "string", "format": "date-time"},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "known_limitations": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "IRSet": {
+      "type": "object",
+      "required": ["name", "index_symbol"],
+      "properties": {
+        "name": {"type": "string"},
+        "index_symbol": {"type": "string"},
+        "size": {"type": "integer"},
+        "source": {"type": "string"},
+        "ordered": {"type": "boolean", "default": false},
+        "members": {"type": "array", "items": {}},
+        "domain_type": {"type": "string", "enum": ["discrete", "continuous", "temporal", "categorical"]}
+      }
+    },
+    "IRParameter": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"type": "string"},
+        "domain": {"type": "array", "items": {"type": "string"}},
+        "type": {"type": "string", "enum": ["float", "integer", "string", "boolean"]},
+        "source": {"type": "string"},
+        "column": {"type": "string"},
+        "description": {"type": "string"},
+        "unit": {"type": "string"},
+        "default_value": {}
+      }
+    },
+    "IRVariable": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"type": "string"},
+        "domain": {"type": "array", "items": {"type": "string"}},
+        "type": {"type": "string", "enum": ["continuous", "integer", "binary", "sos1", "sos2", "indicator"]},
+        "lower_bound": {"type": "number"},
+        "upper_bound": {"type": "number"},
+        "sos_weights": {"type": "array", "items": {"type": "number"}},
+        "indicator_trigger": {"type": "string"},
+        "semantic_role": {"type": "string"},
+        "description": {"type": "string"}
+      }
+    },
+    "IRConstraint": {
+      "type": "object",
+      "required": ["name", "expression"],
+      "properties": {
+        "name": {"type": "string"},
+        "domain": {"type": "array", "items": {"type": "string"}},
+        "expression": {
+          "type": "object",
+          "properties": {
+            "lhs": {"type": "string"},
+            "rel": {"type": "string", "enum": ["<=", ">=", "==", "!="]},
+            "rhs": {"type": "string"}
+          }
+        },
+        "type": {"type": "string", "enum": ["linear", "quadratic", "logical", "big_m", "indicator", "sos"]},
+        "technique": {"type": "string"},
+        "connection_graph_id": {"type": "string"},
+        "description": {"type": "string"},
+        "derived_from": {"type": "string"}
+      }
+    },
+    "IRObjective": {
+      "type": "object",
+      "required": ["sense", "expression"],
+      "properties": {
+        "sense": {"type": "string", "enum": ["minimize", "maximize"]},
+        "expression": {
+          "type": "object",
+          "properties": {
+            "type": {"type": "string", "enum": ["sum", "product", "linear_combination", "custom"]},
+            "over": {"type": "array", "items": {"type": "string"}},
+            "terms": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "description": {"type": "string"}
+      }
+    },
+    "ConnectionGraph": {
+      "type": "object",
+      "properties": {
+        "parameter_to_clauses": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+        "variable_to_clauses": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+        "clause_dependencies": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}}
+      }
+    },
+    "OptimizationTechnique": {
+      "type": "object",
+      "properties": {
+        "technique": {"type": "string", "enum": ["sos1", "sos2", "indicator", "big_m", "linearization", "symmetry_breaking", "warm_start"]},
+        "target": {"type": "string"},
+        "parameters": {"type": "object"}
+      }
+    },
+    "IRProvenance": {
+      "type": "object",
+      "properties": {
+        "extractor_version": {"type": "string"},
+        "formulator_version": {"type": "string"},
+        "extraction_scores": {"type": "object"},
+        "verification_checks_passed": {"type": "integer"},
+        "verification_checks_failed": {"type": "integer"},
+        "llm_model_used": {"type": "string"}
+      }
+    }
+  }
+}
